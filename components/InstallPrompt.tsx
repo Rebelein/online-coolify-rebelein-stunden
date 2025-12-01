@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { GlassCard, GlassButton } from './GlassCard';
 import { Download, X } from 'lucide-react';
@@ -7,41 +8,54 @@ export const InstallPrompt: React.FC = () => {
   const [show, setShow] = useState(false);
 
   useEffect(() => {
-    // Check if app is already running in standalone mode (installed)
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || 
-                         // @ts-ignore
-                         (window.navigator.standalone === true);
-
+    // 1. Prüfen, ob die App bereits installiert ist (Standalone Mode)
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
     if (isStandalone) {
-        console.log("App is running in standalone mode. Hiding install prompt.");
-        return;
+        return; // Nicht anzeigen, wenn bereits installiert
     }
 
-    // 1. Check if the event was already captured in index.html script
+    // Funktion zum Verarbeiten des Events
+    const handlePromptEvent = (e: any) => {
+        e.preventDefault();
+        setDeferredPrompt(e);
+        setShow(true);
+        // @ts-ignore
+        window.deferredInstallPrompt = e; // Global sichern
+    };
+
+    // 2. Event Listener für zukünftige Events registrieren
+    window.addEventListener('beforeinstallprompt', handlePromptEvent);
+
+    // 3. Prüfen, ob das Event bereits global gefeuert wurde (bevor diese Komponente geladen wurde)
     // @ts-ignore
     if (window.deferredInstallPrompt) {
-        console.log("Found cached install prompt");
+        console.log("InstallPrompt: Cached event found immediately");
         // @ts-ignore
-        setDeferredPrompt(window.deferredInstallPrompt);
-        setShow(true);
+        handlePromptEvent(window.deferredInstallPrompt);
     }
 
-    // 2. Also listen for the event if it happens later
-    const handler = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      // @ts-ignore
-      window.deferredInstallPrompt = e; // Sync global
-      setShow(true);
-      console.log("Install prompt event fired in component");
-    };
+    // 4. Sicherheits-Check: Manchmal ist React schneller als das Event im Browser-Zyklus.
+    // Wir prüfen nach 500ms und 2s nochmal, ob das globale Event inzwischen da ist.
+    const checkInterval = setInterval(() => {
+        // @ts-ignore
+        if (window.deferredInstallPrompt && !deferredPrompt) {
+             console.log("InstallPrompt: Cached event found via interval");
+             // @ts-ignore
+             handlePromptEvent(window.deferredInstallPrompt);
+        }
+    }, 1000);
 
-    window.addEventListener('beforeinstallprompt', handler);
+    // Timeout für Interval (nach 5 Sekunden aufhören zu suchen)
+    const timeout = setTimeout(() => {
+        clearInterval(checkInterval);
+    }, 5000);
 
     return () => {
-      window.removeEventListener('beforeinstallprompt', handler);
+      window.removeEventListener('beforeinstallprompt', handlePromptEvent);
+      clearInterval(checkInterval);
+      clearTimeout(timeout);
     };
-  }, []);
+  }, [deferredPrompt]);
 
   const handleInstallClick = async () => {
     if (!deferredPrompt) return;
@@ -58,7 +72,7 @@ export const InstallPrompt: React.FC = () => {
       console.log('User dismissed the install prompt');
     }
 
-    // Event kann nur einmal genutzt werden, daher reset
+    // Event kann nur einmal genutzt werden
     setDeferredPrompt(null);
     // @ts-ignore
     window.deferredInstallPrompt = null;
@@ -68,7 +82,7 @@ export const InstallPrompt: React.FC = () => {
   if (!show) return null;
 
   return (
-    <div className="fixed bottom-20 md:bottom-8 right-4 left-4 md:left-auto md:max-w-sm z-[290] animate-in slide-in-from-bottom-4 duration-500">
+    <div className="fixed bottom-20 md:bottom-8 right-4 left-4 md:left-auto md:max-w-sm z-[1000] animate-in slide-in-from-bottom-4 duration-500">
       <GlassCard className="!bg-blue-900/90 !border-blue-500/50 shadow-[0_0_30px_rgba(59,130,246,0.3)] backdrop-blur-xl relative">
         <button 
             onClick={() => setShow(false)} 
@@ -83,7 +97,7 @@ export const InstallPrompt: React.FC = () => {
           <div className="flex-1 pr-4">
             <h3 className="text-white font-bold text-lg">App installieren</h3>
             <p className="text-blue-100/70 text-xs mt-1 mb-3">
-              Installiere die App auf deinem Startbildschirm für den schnellsten Zugriff und Offline-Funktionen.
+              Installiere die App auf deinem Desktop für direkten Zugriff.
             </p>
             <GlassButton 
               onClick={handleInstallClick}

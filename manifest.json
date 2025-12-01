@@ -3,11 +3,14 @@
   "short_name": "Zeiterfassung",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay"],
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
   "orientation": "portrait",
   "id": "zeiterfassung-rebelein",
   "scope": "/",
+  "description": "Erfasse deine Arbeitszeiten, Pausen und Projekte einfach und effizient.",
+  "categories": ["productivity", "business", "utilities"],
   "icons": [
     {
       "src": "/icon.svg",
@@ -20,6 +23,22 @@
       "sizes": "192x192 512x512",
       "type": "image/svg+xml",
       "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/icon.svg",
+      "sizes": "1024x1024",
+      "type": "image/svg+xml",
+      "form_factor": "wide",
+      "label": "Desktop Ansicht"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "1024x1024",
+      "type": "image/svg+xml",
+      "form_factor": "narrow",
+      "label": "Mobile Ansicht"
     }
   ]
 }
