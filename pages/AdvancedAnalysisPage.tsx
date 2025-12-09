@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useOfficeService, getLocalISOString, getDailyTargetForDate } from '../services/dataService';
 import { supabase } from '../services/supabaseClient';
+import { formatDuration } from '../services/utils/timeUtils';
 import { GlassCard, GlassButton, GlassInput } from '../components/GlassCard';
 import { Calendar, Filter, Save, FileDown, PieChart, BarChart3, TrendingUp, Users, CheckSquare, Square, RefreshCcw, Calculator, Coins, Trash2 } from 'lucide-react';
 import GlassDatePicker from '../components/GlassDatePicker';
@@ -47,9 +48,9 @@ const TYPE_LABELS: Record<string, string> = {
 
 const AdvancedAnalysisPage: React.FC = () => {
     const { users, fetchAllUsers } = useOfficeService();
-    
+
     // --- STATE ---
-    
+
     // Filter State
     const [startDate, setStartDate] = useState(() => {
         const d = new Date(); d.setDate(1); return getLocalISOString(d); // 1. des Monats
@@ -57,13 +58,13 @@ const AdvancedAnalysisPage: React.FC = () => {
     const [endDate, setEndDate] = useState(getLocalISOString());
     const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
     const [selectedTypes, setSelectedTypes] = useState<string[]>(['work', 'company', 'office', 'warehouse', 'car']);
-    
+
     // UI State
     const [showStartPicker, setShowStartPicker] = useState(false);
     const [showEndPicker, setShowEndPicker] = useState(false);
     const [hourlyRate, setHourlyRate] = useState<number>(35.00); // Standardkostensatz
     const [loading, setLoading] = useState(false);
-    
+
     // Data State
     const [rawData, setRawData] = useState<{ entries: TimeEntry[], absences: UserAbsence[] }>({ entries: [], absences: [] });
 
@@ -94,7 +95,7 @@ const AdvancedAnalysisPage: React.FC = () => {
             .from('analysis_presets')
             .select('*')
             .order('name');
-        
+
         if (error) console.error("Fehler beim Laden der Vorlagen:", error);
         else setPresets(data as FilterPreset[]);
     }
@@ -109,14 +110,14 @@ const AdvancedAnalysisPage: React.FC = () => {
     // --- DATA FETCHING ---
     const fetchData = async () => {
         setLoading(true);
-        
+
         // Fetch Entries
         const { data: entriesData, error: entError } = await supabase
             .from('time_entries')
             .select('*')
             .gte('date', startDate)
             .lte('date', endDate);
-            
+
         // Fetch Absences (für Soll-Korrektur und Anzeige)
         const { data: absData, error: absError } = await supabase
             .from('user_absences')
@@ -158,7 +159,7 @@ const AdvancedAnalysisPage: React.FC = () => {
             let billable = 0;
             let overhead = 0;
             let breaks = 0;
-            
+
             userEntries.forEach(e => {
                 if (e.type === 'break') {
                     breaks += e.hours;
@@ -172,31 +173,31 @@ const AdvancedAnalysisPage: React.FC = () => {
             // Soll-Stunden Berechnung für den Zeitraum
             let target = 0;
             let absenceHours = 0;
-            
+
             const cur = new Date(startDate);
             const end = new Date(endDate);
-            
+
             while (cur <= end) {
                 const dStr = getLocalISOString(cur);
                 const dayTarget = getDailyTargetForDate(dStr, user.target_hours);
-                
+
                 // Prüfen auf Abwesenheit
                 const abs = userAbsences.find(a => dStr >= a.start_date && dStr <= a.end_date);
-                
+
                 if (abs) {
-                    if (abs.type !== 'unpaid') absenceHours += dayTarget; 
+                    if (abs.type !== 'unpaid') absenceHours += dayTarget;
                 } else {
                     target += dayTarget;
                 }
                 cur.setDate(cur.getDate() + 1);
             }
-            
+
             // Filter based on selected Types for TOTAL display
             let displayedTotal = 0;
             userEntries.forEach(e => {
-                 if (selectedTypes.includes(e.type || 'work')) {
-                     displayedTotal += e.hours;
-                 }
+                if (selectedTypes.includes(e.type || 'work')) {
+                    displayedTotal += e.hours;
+                }
             });
 
             const totalPresence = billable + overhead;
@@ -233,22 +234,22 @@ const AdvancedAnalysisPage: React.FC = () => {
     // --- HANDLERS ---
 
     const toggleUser = (id: string) => {
-        setSelectedUserIds(prev => 
+        setSelectedUserIds(prev =>
             prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
         );
     };
 
     const toggleType = (type: string) => {
-        setSelectedTypes(prev => 
+        setSelectedTypes(prev =>
             prev.includes(type) ? prev.filter(x => x !== type) : [...prev, type]
         );
     };
 
     const savePreset = async () => {
         if (!presetName) return alert("Bitte Namen eingeben");
-        
+
         const filters = { startDate, endDate, selectedUserIds, selectedTypes };
-        
+
         const { error } = await supabase.from('analysis_presets').insert({
             name: presetName,
             filters: filters
@@ -287,11 +288,11 @@ const AdvancedAnalysisPage: React.FC = () => {
             s.efficiency.toFixed(1) + '%',
             s.costEstimate.toFixed(2)
         ]);
-        
-        const csvContent = "data:text/csv;charset=utf-8," 
+
+        const csvContent = "data:text/csv;charset=utf-8,"
             + header.join(";") + "\n"
             + rows.map(e => e.join(";")).join("\n");
-            
+
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
         link.setAttribute("href", encodedUri);
@@ -302,12 +303,12 @@ const AdvancedAnalysisPage: React.FC = () => {
 
     const generatePDF = () => {
         const doc = new jsPDF('l', 'mm', 'a4'); // Landscape for more columns
-        
+
         // Header
         doc.setFontSize(18);
         doc.setFont("helvetica", "bold");
         doc.text("Detaillierte Auswertung (Profi)", 14, 20);
-        
+
         doc.setFontSize(11);
         doc.setFont("helvetica", "normal");
         doc.text(`Zeitraum: ${new Date(startDate).toLocaleDateString('de-DE')} bis ${new Date(endDate).toLocaleDateString('de-DE')}`, 14, 28);
@@ -354,13 +355,13 @@ const AdvancedAnalysisPage: React.FC = () => {
                 7: { halign: 'right' }
             },
             foot: [[
-                'GESAMT', 
-                '-', 
-                totals.total.toFixed(2), 
-                totals.billable.toFixed(2), 
-                totals.overhead.toFixed(2), 
-                '-', 
-                ((totals.billable / (totals.billable + totals.overhead || 1)) * 100).toFixed(1) + '%', 
+                'GESAMT',
+                '-',
+                totals.total.toFixed(2),
+                totals.billable.toFixed(2),
+                totals.overhead.toFixed(2),
+                '-',
+                ((totals.billable / (totals.billable + totals.overhead || 1)) * 100).toFixed(1) + '%',
                 totals.cost.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })
             ]],
             footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold', halign: 'right' }
@@ -373,14 +374,14 @@ const AdvancedAnalysisPage: React.FC = () => {
 
     return (
         <div className="hidden md:flex flex-row h-full w-full bg-gray-900 text-white overflow-hidden">
-            
+
             {/* SIDEBAR: FILTER & PRESETS */}
             <div className="w-80 flex-shrink-0 border-r border-white/10 bg-gray-900/50 p-6 overflow-y-auto flex flex-col gap-8">
                 <div>
                     <h2 className="text-xl font-bold flex items-center gap-2 mb-6 text-purple-300">
                         <Filter size={24} /> Filter
                     </h2>
-                    
+
                     {/* Date Range */}
                     <div className="space-y-4 mb-6">
                         <div>
@@ -398,12 +399,11 @@ const AdvancedAnalysisPage: React.FC = () => {
                         <label className="text-xs uppercase font-bold text-white/50 mb-2 block">Kategorien</label>
                         <div className="space-y-1">
                             {['work', 'company', 'office', 'warehouse', 'car', 'break', 'overtime_reduction'].map(type => (
-                                <button 
+                                <button
                                     key={type}
                                     onClick={() => toggleType(type)}
-                                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-bold transition-all ${
-                                        selectedTypes.includes(type) ? 'bg-teal-500/20 text-teal-200 border border-teal-500/30' : 'bg-white/5 text-white/40 border border-transparent'
-                                    }`}
+                                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-bold transition-all ${selectedTypes.includes(type) ? 'bg-teal-500/20 text-teal-200 border border-teal-500/30' : 'bg-white/5 text-white/40 border border-transparent'
+                                        }`}
                                 >
                                     {selectedTypes.includes(type) ? <CheckSquare size={14} /> : <Square size={14} />}
                                     <span className="uppercase">{TYPE_LABELS[type] || type}</span>
@@ -414,11 +414,11 @@ const AdvancedAnalysisPage: React.FC = () => {
 
                     {/* Cost Config */}
                     <div className="mb-6">
-                        <label className="text-xs uppercase font-bold text-white/50 mb-1 block flex items-center gap-1"><Coins size={12}/> Kostensatz (EUR/h)</label>
-                        <GlassInput 
-                            type="number" 
-                            value={hourlyRate} 
-                            onChange={e => setHourlyRate(parseFloat(e.target.value))} 
+                        <label className="text-xs uppercase font-bold text-white/50 mb-1 block flex items-center gap-1"><Coins size={12} /> Kostensatz (EUR/h)</label>
+                        <GlassInput
+                            type="number"
+                            value={hourlyRate}
+                            onChange={e => setHourlyRate(parseFloat(e.target.value))}
                             className="text-right font-mono text-sm"
                         />
                     </div>
@@ -434,12 +434,11 @@ const AdvancedAnalysisPage: React.FC = () => {
                     </div>
                     <div className="max-h-60 overflow-y-auto space-y-1 pr-2">
                         {users.map(u => (
-                            <button 
+                            <button
                                 key={u.user_id}
                                 onClick={() => toggleUser(u.user_id!)}
-                                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold transition-all ${
-                                    selectedUserIds.includes(u.user_id!) ? 'bg-purple-500/20 text-purple-200 border border-purple-500/30' : 'bg-white/5 text-white/40 border border-transparent'
-                                }`}
+                                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold transition-all ${selectedUserIds.includes(u.user_id!) ? 'bg-purple-500/20 text-purple-200 border border-purple-500/30' : 'bg-white/5 text-white/40 border border-transparent'
+                                    }`}
                             >
                                 <span>{u.display_name}</span>
                                 {selectedUserIds.includes(u.user_id!) && <CheckSquare size={12} />}
@@ -450,25 +449,25 @@ const AdvancedAnalysisPage: React.FC = () => {
 
                 {/* Presets */}
                 <div className="border-t border-white/10 pt-4">
-                     <label className="text-xs uppercase font-bold text-white/50 mb-2 block">Vorlagen (Geteilt)</label>
-                     <div className="flex gap-2 mb-2">
-                         <GlassInput 
-                            placeholder="Name..." 
-                            value={presetName} 
-                            onChange={e => setPresetName(e.target.value)} 
+                    <label className="text-xs uppercase font-bold text-white/50 mb-2 block">Vorlagen (Geteilt)</label>
+                    <div className="flex gap-2 mb-2">
+                        <GlassInput
+                            placeholder="Name..."
+                            value={presetName}
+                            onChange={e => setPresetName(e.target.value)}
                             className="!py-1 !px-2 !text-xs h-8"
-                         />
-                         <button onClick={savePreset} className="p-2 bg-teal-500 rounded text-white hover:bg-teal-400"><Save size={14}/></button>
-                     </div>
-                     <div className="space-y-1">
-                         {presets.length === 0 && <p className="text-[10px] text-white/30 italic">Keine Vorlagen gespeichert.</p>}
-                         {presets.map(p => (
-                             <div key={p.id} className="flex justify-between items-center bg-white/5 px-2 py-1 rounded text-xs group hover:bg-white/10 transition-colors">
-                                 <button onClick={() => loadPreset(p)} className="flex-1 text-left text-white/70 hover:text-white truncate">{p.name}</button>
-                                 <button onClick={() => deletePreset(p.id)} className="text-white/20 hover:text-red-400 opacity-0 group-hover:opacity-100 p-1"><Trash2 size={12}/></button>
-                             </div>
-                         ))}
-                     </div>
+                        />
+                        <button onClick={savePreset} className="p-2 bg-teal-500 rounded text-white hover:bg-teal-400"><Save size={14} /></button>
+                    </div>
+                    <div className="space-y-1">
+                        {presets.length === 0 && <p className="text-[10px] text-white/30 italic">Keine Vorlagen gespeichert.</p>}
+                        {presets.map(p => (
+                            <div key={p.id} className="flex justify-between items-center bg-white/5 px-2 py-1 rounded text-xs group hover:bg-white/10 transition-colors">
+                                <button onClick={() => loadPreset(p)} className="flex-1 text-left text-white/70 hover:text-white truncate">{p.name}</button>
+                                <button onClick={() => deletePreset(p.id)} className="text-white/20 hover:text-red-400 opacity-0 group-hover:opacity-100 p-1"><Trash2 size={12} /></button>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
 
@@ -495,7 +494,7 @@ const AdvancedAnalysisPage: React.FC = () => {
 
                 {loading ? (
                     <div className="flex-1 flex items-center justify-center">
-                         <div className="w-8 h-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+                        <div className="w-8 h-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
                     </div>
                 ) : (
                     <div className="p-6 overflow-y-auto space-y-6">
@@ -506,7 +505,7 @@ const AdvancedAnalysisPage: React.FC = () => {
                                 <div className="text-3xl font-mono font-bold text-white">{totals.total.toFixed(2)} <span className="text-sm text-white/40">h</span></div>
                                 <div className="text-xs text-white/40 mt-1">Alle gewählten Kategorien</div>
                             </GlassCard>
-                            
+
                             <GlassCard className="bg-blue-900/10 border-blue-500/20">
                                 <div className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-2">Verrechenbar</div>
                                 <div className="text-3xl font-mono font-bold text-white">{totals.billable.toFixed(2)} <span className="text-sm text-white/40">h</span></div>
@@ -542,7 +541,7 @@ const AdvancedAnalysisPage: React.FC = () => {
                                         <div key={s.userId} className="flex flex-col items-center gap-2 flex-1 min-w-[60px] group">
                                             <div className="relative w-12 bg-gray-700 rounded-t-lg overflow-hidden transition-all duration-500 group-hover:w-14" style={{ height: `${hPercent}%` }}>
                                                 {/* Billable Part */}
-                                                <div 
+                                                <div
                                                     className="absolute bottom-0 w-full bg-teal-500 transition-all duration-500 hover:bg-teal-400"
                                                     style={{ height: `${billablePercent}%` }}
                                                     title={`Verrechenbar: ${s.billableHours.toFixed(2)}h`}
@@ -550,7 +549,7 @@ const AdvancedAnalysisPage: React.FC = () => {
                                                 {/* Overhead Part (Implicitly the background gray/top part) */}
                                             </div>
                                             <span className="text-[10px] text-white/60 font-bold truncate max-w-[80px]">{s.displayName.split(' ')[0]}</span>
-                                            <span className="text-[10px] text-white/30 font-mono">{s.totalHours.toFixed(0)}h</span>
+                                            <span className="text-[10px] text-white/30 font-mono">{s.totalHours.toFixed(2)}h</span>
                                         </div>
                                     )
                                 })}
@@ -601,7 +600,7 @@ const AdvancedAnalysisPage: React.FC = () => {
                 {showStartPicker && <GlassDatePicker value={startDate} onChange={setStartDate} onClose={() => setShowStartPicker(false)} />}
                 {showEndPicker && <GlassDatePicker value={endDate} onChange={setEndDate} onClose={() => setShowEndPicker(false)} />}
             </div>
-            
+
             {/* MOBILE BLOCKER (Technically hidden via flex md:flex, but purely as safeguard) */}
             <div className="md:hidden fixed inset-0 bg-gray-900 z-[9999] flex items-center justify-center p-8 text-center">
                 <div>
