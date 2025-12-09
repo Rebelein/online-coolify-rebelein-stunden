@@ -47,14 +47,19 @@
       border-radius: 10px;
     }
 
-    /* iOS PWA Fix: Ensure inputs are selectable */
+    /* iOS PWA Fix: Ensure inputs are selectable and interactable */
+    * {
+      -webkit-tap-highlight-color: transparent;
+    }
+
     input,
     textarea,
     select,
-    /* button? */
     [contenteditable] {
-      -webkit-user-select: text;
-      user-select: text;
+      -webkit-user-select: text !important;
+      user-select: text !important;
+      /* Fix for iOS PWA focus issues: forcing hardware acceleration */
+      transform: translate3d(0, 0, 0); 
     }
   </style>
   <!-- CRITICAL: Capture install prompt early -->
