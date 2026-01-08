@@ -139,12 +139,15 @@ const AnalysisPage: React.FC = () => {
         }
 
         entries.forEach(e => {
-            if (!['vacation', 'sick', 'holiday'].includes(e.type || '')) return;
+            // INCLUDE 'special_holiday' for our virtual entries
+            if (!['vacation', 'sick', 'holiday', 'special_holiday'].includes(e.type || '')) return;
 
             const d = new Date(e.date); d.setHours(12, 0, 0, 0);
 
             if (d.getTime() >= startMs && d.getTime() <= endMs && e.date >= effectiveStartDate) {
                 const dateStr = e.date;
+                // For regular absences (and special_holiday which maps to reduced target),
+                // we credit the full daily target for that specific date.
                 if (!creditedDates.has(dateStr)) {
                     const dailyTarget = getDailyTargetForDate(dateStr, settings.target_hours);
                     credits += dailyTarget;
@@ -466,13 +469,13 @@ const AnalysisPage: React.FC = () => {
                 continue;
             }
 
-            const entryAbsence = entries.find(e => e.date === dateStr && ['vacation', 'sick', 'holiday', 'unpaid'].includes(e.type || ''));
+            const entryAbsence = entries.find(e => e.date === dateStr && ['vacation', 'sick', 'holiday', 'unpaid', 'special_holiday'].includes(e.type || ''));
             if (entryAbsence) {
                 grid.push({ day: d, type: 'absence', absenceType: entryAbsence.type as any });
                 continue;
             }
 
-            const dayEntries = entries.filter(e => e.date === dateStr && e.type !== 'break');
+            const dayEntries = entries.filter(e => e.date === dateStr && e.type !== 'break' && e.type !== 'special_holiday');
 
             // Calculate stats
             const totalHours = dayEntries.reduce((sum, e) => sum + e.hours, 0); // Includes Overtime Reduction!
@@ -521,6 +524,7 @@ const AnalysisPage: React.FC = () => {
                 case 'vacation': return 'bg-purple-500/20 border-purple-500/40 text-purple-200';
                 case 'sick': return 'bg-red-500/20 border-red-500/40 text-red-200';
                 case 'holiday': return 'bg-blue-500/20 border-blue-500/40 text-blue-200';
+                case 'special_holiday': return 'bg-teal-500/20 border-teal-500/40 text-teal-200'; // Special Color for Special Holiday
                 case 'unpaid': return 'bg-gray-700/40 border-gray-500/40 text-gray-400';
             }
         }

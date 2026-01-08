@@ -12,6 +12,11 @@ export interface ExportData {
     entries: TimeEntry[];
     dailyLogs: DailyLog[];
     absences: UserAbsence[];
+    yearAbsenceEntries: TimeEntry[];
+    historyEntries: TimeEntry[];
+    historyAbsences: UserAbsence[];
+    employmentStartDate?: string;
+    initialBalance: number;
     settings: UserSettings;
 }
 
@@ -55,12 +60,145 @@ export const fetchExportData = async (userId: string, startDate: string, endDate
         .lte('start_date', yearEnd)
         .gte('end_date', yearStart);
 
+    // 5. Fetch Absence Entries (Whole Year for Stats - Legacy/Daily Entry Absences)
+    const { data: yearEntriesData } = await supabase
+        .from('time_entries')
+        .select('*')
+        .eq('user_id', userId)
+        .gte('date', yearStart)
+        .lte('date', yearEnd)
+        .in('type', ['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay', 'special_holiday']);
+
+    // 6. INJECT VIRTUAL ENTRIES (24.12. / 31.12.) - Mirroring dataService logic
+    const entryList = (entriesData as TimeEntry[]) || [];
+    const requestedStart = new Date(startDate);
+    const requestedEnd = new Date(endDate);
+    const yearsToCheck = new Set<number>();
+    let yC = new Date(requestedStart);
+    while (yC <= requestedEnd) {
+        yearsToCheck.add(yC.getFullYear());
+        yC.setDate(yC.getDate() + 10); // jump 10 days
+    }
+
+    yearsToCheck.forEach(year => {
+        [24, 31].forEach(day => {
+            const dateStr = `${year}-12-${day}`;
+            const d = new Date(dateStr);
+            const dow = d.getDay();
+            // Only Mo-Fr
+            if (dow >= 1 && dow <= 5) {
+                // Check if already covered by physical entry of type special_holiday
+                const exists = entryList.some(e => e.date === dateStr && e.type === 'special_holiday');
+                if (!exists) {
+                    // Check if data range covers this date (optimization)
+                    const dateMs = new Date(dateStr).getTime();
+                    if (dateMs >= requestedStart.getTime() && dateMs <= requestedEnd.getTime()) {
+                        entryList.push({
+                            id: `virtual-${dateStr}-special-export`,
+                            user_id: userId,
+                            date: dateStr,
+                            client_name: 'Sonderurlaub',
+                            type: 'special_holiday',
+                            hours: getDailyTargetForDate(dateStr, userData.target_hours), // Use calculated target (halved)
+                            note: 'Automatisch: ½ Tag Sonderurlaub',
+                            created_at: new Date().toISOString(),
+                            start_time: '',
+                            end_time: ''
+                        });
+                    }
+                }
+            }
+        });
+    });
+
+    // 7. FETCH HISTORY DATA (For Cumulative Balance)
+    let historyStart = userData.employment_start_date;
+
+    if (!historyStart) {
+        // Fallback: Find the very first entry for this user
+        const { data: firstEntry } = await supabase
+            .from('time_entries')
+            .select('date')
+            .eq('user_id', userId)
+            .order('date', { ascending: true })
+            .limit(1)
+            .single();
+
+        if (firstEntry) {
+            historyStart = firstEntry.date;
+        } else {
+            historyStart = startDate; // No history, start from report start
+        }
+    }
+
+    // Fetch all entries from historyStart to endDate
+    const { data: histEntriesData } = await supabase
+        .from('time_entries')
+        .select('*')
+        .eq('user_id', userId)
+        .gte('date', historyStart)
+        .lte('date', endDate);
+
+    const { data: histAbsData } = await supabase
+        .from('user_absences')
+        .select('*')
+        .eq('user_id', userId)
+        .gte('end_date', historyStart)
+        .lte('start_date', endDate); // Overlap check simplified
+
+    let historyEntries = (histEntriesData as TimeEntry[]) || [];
+    const historyAbsences = (histAbsData as UserAbsence[]) || [];
+
+    // Inject virtuals into history
+    const histStartObj = new Date(historyStart);
+    const histEndObj = new Date(endDate);
+    const histYears = new Set<number>();
+    let hY = new Date(histStartObj);
+    while (hY <= histEndObj) {
+        histYears.add(hY.getFullYear());
+        hY.setDate(hY.getDate() + 100); // lighter step
+    }
+    histYears.add(histEndObj.getFullYear());
+
+    histYears.forEach(year => {
+        [24, 31].forEach(day => {
+            const dateStr = `${year}-12-${day}`;
+            const d = new Date(dateStr);
+            const dow = d.getDay();
+            if (dow >= 1 && dow <= 5) {
+                const exists = historyEntries.some(e => e.date === dateStr && e.type === 'special_holiday');
+                if (!exists) {
+                    if (dateStr >= historyStart && dateStr <= endDate) {
+                        historyEntries.push({
+                            id: `virtual-hist-${dateStr}`,
+                            user_id: userId,
+                            date: dateStr,
+                            client_name: 'Sonderurlaub',
+                            type: 'special_holiday',
+                            hours: getDailyTargetForDate(dateStr, userData.target_hours),
+                            note: 'Automatisch',
+                            created_at: new Date().toISOString(),
+                            start_time: '',
+                            end_time: ''
+                        });
+                    }
+                }
+            }
+        });
+    });
+
+
     return {
         userId,
         userDisplayName: userData.display_name,
-        entries: (entriesData as TimeEntry[]) || [],
+        entries: entryList,
         dailyLogs: (logsData as DailyLog[]) || [],
         absences: (absData as UserAbsence[]) || [],
+        yearAbsenceEntries: (yearEntriesData as TimeEntry[]) || [],
+        historyEntries,
+        historyAbsences,
+        employmentStartDate: historyStart,
+        initialBalance: userData.initial_overtime_balance || 0,
         settings: userData as UserSettings
     };
 };
@@ -405,7 +543,7 @@ export const generateAttendancePdfBlob = (data: ExportData, startDate: string, e
 
 // --- Generate Monthly Report PDF (Gesamtliste) ---
 export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string, endDate: string): Blob => {
-    const { entries, absences, settings, userDisplayName } = data;
+    const { entries, absences, yearAbsenceEntries, settings, userDisplayName } = data;
     const start = new Date(startDate);
     const end = new Date(endDate);
     const year = start.getFullYear();
@@ -422,8 +560,8 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
         // Check if day is a paid absence
         const abs = absences.find(a => dateStr >= a.start_date && dateStr <= a.end_date && ['vacation', 'sick', 'holiday'].includes(a.type));
         if (abs) return getDailyTargetForDate(dateStr, settings.target_hours);
-        // Check local entries as fallback (legacy)
-        const entryAbs = entries.find(e => e.date === dateStr && ['vacation', 'sick', 'holiday'].includes(e.type || ''));
+        // Check local entries as fallback (legacy) - INCLUDE special_holiday for virtual logic matching
+        const entryAbs = entries.find(e => e.date === dateStr && ['vacation', 'sick', 'holiday', 'special_holiday'].includes(e.type || ''));
         if (entryAbs) return getDailyTargetForDate(dateStr, settings.target_hours);
         return 0;
     };
@@ -436,14 +574,16 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
         // Find Absence
         // Find Absence
         const abs = absences.find(a => dateStr >= a.start_date && dateStr <= a.end_date);
-        const isUnpaid = (abs && ['unpaid', 'sick_child', 'sick_pay'].includes(abs.type)) || entries.some(e => e.date === dateStr && e.type === 'unpaid');
+        const isUnpaid = (abs && ['unpaid', 'sick_child', 'sick_pay'].includes(abs.type)) ||
+            entries.some(e => e.date === dateStr && ['unpaid', 'sick_child', 'sick_pay'].includes(e.type || ''));
 
         if (!isUnpaid) {
             monthlyTarget += dailyTarget;
         }
 
         // Actuals: Projects + Credits
-        const dayEntries = entries.filter(e => e.date === dateStr && e.type !== 'break' && e.type !== 'overtime_reduction');
+        // INCLUDE overtime_reduction to match App "Project Hours"
+        const dayEntries = entries.filter(e => e.date === dateStr && e.type !== 'break');
         const dayHours = dayEntries.reduce((sum, e) => sum + e.hours, 0);
         const credits = calculateCredits(dateStr);
 
@@ -453,7 +593,7 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
     }
     monthlyDifference = monthlyActual - monthlyTarget;
 
-    // 2. Yearly Stats (Vacation, Sick) - Based on fetched yearly absences
+    // 2. Yearly Stats (Vacation, Sick) - Based on fetched yearly absences AND yearly entries
     let vacationDays = 0;
     let sickDays = 0;
     let sickChildDays = 0;
@@ -477,18 +617,32 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
         }
     });
 
+    // Map for entries
+    const entryAbsMap = new Map<string, TimeEntry>();
+    if (yearAbsenceEntries) {
+        yearAbsenceEntries.forEach(e => {
+            entryAbsMap.set(e.date, e);
+        });
+    }
+
     while (yCurr <= yearEnd) {
         const dStr = getLocalISOString(yCurr);
         const dailyTarget = getDailyTargetForDate(dStr, settings.target_hours);
 
         if (dailyTarget > 0) {
             const abs = absMap.get(dStr);
-            if (abs) {
-                if (abs.type === 'vacation') vacationDays++;
-                if (abs.type === 'sick') sickDays++;
-                if (abs.type === 'sick_child') sickChildDays++;
-                if (abs.type === 'sick_pay') sickPayDays++;
-                if (abs.type === 'unpaid') unpaidDays++;
+            const entryAbs = entryAbsMap.get(dStr);
+
+            // Prioritize absence (if both exist, usually absence planner is more authoritative, but entry is fine too)
+            // If they conflict, strict absences logic usually wins in UI.
+            const type = abs ? abs.type : (entryAbs ? entryAbs.type : null);
+
+            if (type) {
+                if (type === 'vacation') vacationDays++;
+                if (type === 'sick') sickDays++;
+                if (type === 'sick_child') sickChildDays++;
+                if (type === 'sick_pay') sickPayDays++;
+                if (type === 'unpaid') unpaidDays++;
             }
         }
         yCurr.setDate(yCurr.getDate() + 1);
@@ -521,7 +675,14 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
     });
 
     // Merge with absences for the list view
-    const combinedList: any[] = [...monthEntries];
+    // Fix hours for special_holiday (virtual entries have 0 hours initially)
+    const combinedList: any[] = monthEntries.map(e => {
+        if (e.type === 'special_holiday') {
+            // Credit for special holiday is the daily target of that day (which is already halved by getDailyTargetForDate)
+            return { ...e, hours: getDailyTargetForDate(e.date, settings.target_hours) };
+        }
+        return e;
+    });
 
     // Add absences as synthetic entries if not already present as entries
     absences.forEach(abs => {
@@ -538,14 +699,15 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
                         'holiday': 'Feiertag',
                         'unpaid': 'Unbezahlt',
                         'sick_child': 'Kind krank',
-                        'sick_pay': 'Krankengeld'
+                        'sick_pay': 'Krankengeld',
+                        'special_holiday': 'Sonderurlaub'
                     };
                     combinedList.push({
                         date: dStr,
                         client_name: labelMap[abs.type] || 'Abwesend',
                         hours: (!['unpaid', 'sick_child', 'sick_pay'].includes(abs.type) ? getDailyTargetForDate(dStr, settings.target_hours) : 0),
                         note: abs.note,
-                        isAbsence: true,
+                        isAbsence: true, // Only true absences from planner
                         type: abs.type
                     });
                 }
@@ -562,11 +724,13 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
     });
 
     const sortedDates = Object.keys(daysMap).sort();
+
+    // Flatten list with Headers
     const tableBody: any[] = [];
 
-    sortedDates.forEach(dateStr => {
+    sortedDates.forEach((dateStr, index) => {
         const dateObj = new Date(dateStr);
-        const dateDisplay = dateObj.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
+        const dateDisplay = dateObj.toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
 
         const dayItems = daysMap[dateStr];
         // Sort items
@@ -575,15 +739,41 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
             return (a.start_time || '').localeCompare(b.start_time || '');
         });
 
-        dayItems.forEach((item, idx) => {
+        // Add Spacer Row if not first item
+        if (index > 0) {
+            tableBody.push([{
+                content: '',
+                colSpan: 4,
+                styles: {
+                    fillColor: [255, 255, 255],
+                    lineWidth: 0,
+                    minCellHeight: 2
+                }
+            }]);
+        }
+
+        // Calculate Day Total for Header
+        const dayTotal = dayItems.reduce((sum, item) => item.type !== 'break' ? sum + item.hours : sum, 0);
+
+        // Header Row
+        tableBody.push([{
+            content: dateDisplay,
+            colSpan: 2,
+            styles: { fillColor: [240, 240, 240], fontStyle: 'bold', lineWidth: { top: 0.1, right: 0.1, bottom: 0.1, left: 0.1 } }
+        }, {
+            content: dayTotal > 0 ? dayTotal.toFixed(2).replace('.', ',') : '-',
+            styles: { fillColor: [240, 240, 240], fontStyle: 'bold', halign: 'right', lineWidth: { top: 0.1, right: 0.1, bottom: 0.1, left: 0.1 } }
+        }, {
+            content: '',
+            styles: { fillColor: [240, 240, 240], lineWidth: { top: 0.1, right: 0.1, bottom: 0.1, left: 0.1 } }
+        }]);
+
+        dayItems.forEach((item) => {
             const label = item.client_name + (item.type === 'break' ? ' (Pause)' : '');
             const hoursStr = item.hours > 0 ? item.hours.toFixed(2).replace('.', ',') : '-';
 
-            // First row of the day shows the date
-            const dCol = idx === 0 ? dateDisplay : '';
-
             tableBody.push([
-                dCol,
+                item.start_time ? `${item.start_time}${item.end_time ? ' - ' + item.end_time : ''}` : '', // Time Range Column (New)
                 label,
                 hoursStr,
                 item.note || ''
@@ -594,23 +784,69 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
     autoTable(doc, {
         startY: 45,
         margin: { left: margin, right: margin },
-        head: [['Datum', 'Projekt / Tätigkeit', 'Std', 'Notiz']],
+        head: [['Zeit', 'Projekt / Tätigkeit', 'Std', 'Notiz']],
         body: tableBody,
         theme: 'grid',
         headStyles: { fillColor: [55, 65, 81], textColor: [255, 255, 255], fontStyle: 'bold' },
         columnStyles: {
-            0: { cellWidth: 25, fontStyle: 'bold' },
-            1: { cellWidth: 'auto' },
-            2: { cellWidth: 15, halign: 'right' },
-            3: { cellWidth: 50, fontStyle: 'italic', textColor: [100, 100, 100] }
+            0: { cellWidth: 25 }, // Time
+            1: { cellWidth: 'auto' }, // Project
+            2: { cellWidth: 15, halign: 'right' }, // Hours
+            3: { cellWidth: 50, fontStyle: 'italic', textColor: [100, 100, 100] } // Note
         },
     });
 
     // @ts-ignore
     let finalY = doc.lastAutoTable.finalY + 10;
 
+    // --- Cumulative Balance Calculation ---
+    const historyStartStr = data.employmentStartDate || `${new Date().getFullYear()}-01-01`;
+    // If we have history data, calculate total balance
+    let cumulativeBalance = 0;
+
+    if (data.historyEntries && data.historyAbsences) {
+        const hStart = new Date(historyStartStr);
+        const hEnd = new Date(endDate);
+
+        // Helper for history credits
+        const getHistoryCredits = (dStr: string) => {
+            const hAbs = data.historyAbsences.find(a => dStr >= a.start_date && dStr <= a.end_date && ['vacation', 'sick', 'holiday'].includes(a.type));
+            if (hAbs) return getDailyTargetForDate(dStr, settings.target_hours);
+            // Check legacy local entries in history
+            const entryAbs = data.historyEntries.find(e => e.date === dStr && ['vacation', 'sick', 'holiday', 'special_holiday'].includes(e.type || ''));
+            if (entryAbs) return getDailyTargetForDate(dStr, settings.target_hours);
+            return 0;
+        };
+
+        const hCurr = new Date(hStart);
+        while (hCurr <= hEnd) {
+            const dStr = getLocalISOString(hCurr);
+            let dTarget = getDailyTargetForDate(dStr, settings.target_hours);
+
+            // Check Unpaid
+            const hAbs = data.historyAbsences.find(a => dStr >= a.start_date && dStr <= a.end_date);
+            const isUnpaid = (hAbs && ['unpaid', 'sick_child', 'sick_pay'].includes(hAbs.type)) ||
+                data.historyEntries.some(e => e.date === dStr && ['unpaid', 'sick_child', 'sick_pay'].includes(e.type || ''));
+
+            if (isUnpaid) dTarget = 0;
+
+            const dEntries = data.historyEntries.filter(e => e.date === dStr && e.type !== 'break');
+            const dHours = dEntries.reduce((s, e) => s + e.hours, 0);
+            const dCredits = getHistoryCredits(dStr);
+
+            cumulativeBalance += (dHours + dCredits - dTarget);
+            hCurr.setDate(hCurr.getDate() + 1);
+        }
+    }
+
+    const initialBalance = data.initialBalance || 0;
+    const finalTotalBalance = initialBalance + cumulativeBalance;
+    const calcStartFormatted = new Date(historyStartStr).toLocaleDateString('de-DE');
+
+
     // Check if we need a new page for summary
-    if (finalY > pageHeight - 60) {
+    const SUMMARY_HEIGHT = 85;
+    if (finalY > pageHeight - (SUMMARY_HEIGHT + 10)) {
         doc.addPage();
         finalY = 20;
     }
@@ -618,7 +854,7 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
     // --- Summary Block ---
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.1);
-    doc.rect(margin, finalY, pageWidth - (margin * 2), 55);
+    doc.rect(margin, finalY, pageWidth - (margin * 2), SUMMARY_HEIGHT);
 
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
@@ -634,19 +870,40 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
 
     // Monthly Stats
     doc.text(`Monat Soll:`, leftColX, lineH);
-    doc.text(`${monthlyTarget.toFixed(2).replace('.', ',')} h`, leftColX + 40, lineH, { align: 'right' });
+    doc.text(`${monthlyTarget.toFixed(2).replace('.', ',')} h`, leftColX + 65, lineH, { align: 'right' });
 
     doc.text(`Monat Ist:`, leftColX, lineH + gap);
-    doc.text(`${monthlyActual.toFixed(2).replace('.', ',')} h`, leftColX + 40, lineH + gap, { align: 'right' });
+    doc.text(`${monthlyActual.toFixed(2).replace('.', ',')} h`, leftColX + 65, lineH + gap, { align: 'right' });
 
     doc.setFont("helvetica", "bold");
     doc.text(`Differenz:`, leftColX, lineH + (gap * 2));
     const diffPrefix = monthlyDifference > 0 ? '+' : '';
     const diffColor = monthlyDifference >= 0 ? [0, 100, 0] : [200, 0, 0];
     doc.setTextColor(diffColor[0], diffColor[1], diffColor[2]);
-    doc.text(`${diffPrefix}${Math.abs(monthlyDifference).toFixed(2).replace('.', ',')} h`, leftColX + 40, lineH + (gap * 2), { align: 'right' });
+    doc.text(`${diffPrefix}${Math.abs(monthlyDifference).toFixed(2).replace('.', ',')} h`, leftColX + 65, lineH + (gap * 2), { align: 'right' });
     doc.setTextColor(0, 0, 0);
     doc.setFont("helvetica", "normal");
+
+    // Total Stats (New)
+    const totalY = lineH + (gap * 4); // Spacer
+    doc.text(`Startsaldo (Übertrag):`, leftColX, totalY);
+    doc.text(`${initialBalance.toFixed(2).replace('.', ',')} h`, leftColX + 65, totalY, { align: 'right' });
+
+    doc.setFont("helvetica", "bold");
+    doc.text(`Gesamtsaldo:`, leftColX, totalY + gap);
+    const totalPrefix = finalTotalBalance > 0 ? '+' : '';
+    const totalColor = finalTotalBalance >= 0 ? [0, 100, 0] : [200, 0, 0];
+    doc.setTextColor(totalColor[0], totalColor[1], totalColor[2]);
+    doc.text(`${totalPrefix}${Math.abs(finalTotalBalance).toFixed(2).replace('.', ',')} h`, leftColX + 65, totalY + gap, { align: 'right' });
+    doc.setTextColor(0, 0, 0);
+    doc.setFont("helvetica", "normal");
+
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`(Berechnung ab: ${calcStartFormatted})`, leftColX, totalY + (gap * 2) + 2);
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(10);
+
 
     // Yearly Stats
     doc.text(`Urlaubstage (Gesamt):`, rightColX, lineH);

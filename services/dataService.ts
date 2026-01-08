@@ -10,8 +10,23 @@ import { supabase } from './supabaseClient';
  * Previously handled history, now simplified to just current settings.
  */
 export const getDailyTargetForDate = (dateStr: string, fallbackTargets: DailyTarget): number => {
-  const dow = new Date(dateStr).getDay();
-  return fallbackTargets[dow as keyof DailyTarget] || 0;
+  const date = new Date(dateStr);
+  const dow = date.getDay();
+  let target = fallbackTargets[dow as keyof DailyTarget] || 0;
+
+  // Sonderregelung 24.12. und 31.12.
+  // Wenn diese Tage auf einen Wochentag (Mo-Fr, 1-5) fallen, halbiert sich die Arbeitszeit.
+  const month = date.getMonth(); // 0-indexed (11 = Dezember)
+  const day = date.getDate();
+
+  if (month === 11 && (day === 24 || day === 31)) {
+    // Prüfen ob Wochentag (Mo=1 ... Fr=5)
+    if (dow >= 1 && dow <= 5) {
+      return target / 2;
+    }
+  }
+
+  return target;
 };
 
 /**
@@ -133,10 +148,60 @@ export const useTimeEntries = (customUserId?: string) => {
 
     const { data, error } = await query;
 
+    // Fetch user settings for accurate target calculation
+    let userTargetHours = DEFAULT_SETTINGS.target_hours;
+    const targetUserId = customUserId || user?.id;
+    if (targetUserId) {
+      const { data: s } = await supabase.from('user_settings').select('target_hours').eq('user_id', targetUserId).single();
+      if (s?.target_hours) userTargetHours = s.target_hours;
+    }
+
     if (error) {
       console.error('Error fetching entries:', error.message || JSON.stringify(error));
     } else if (data) {
-      setEntries(data as TimeEntry[]);
+      setEntries(prev => {
+        let fetchedEntries = data as TimeEntry[];
+
+        // --- SONDERURLAUB INJECTION (24.12. / 31.12.) ---
+        const years = new Set(fetchedEntries.map(e => new Date(e.date).getFullYear()));
+        const currentYear = new Date().getFullYear();
+        years.add(currentYear);
+        years.add(currentYear - 1);
+
+        const virtualEntries: TimeEntry[] = [];
+
+        years.forEach(year => {
+          if (year > new Date().getFullYear()) return;
+
+          [24, 31].forEach(day => {
+            const dateStr = `${year}-12-${day}`;
+            const d = new Date(dateStr);
+            const dow = d.getDay();
+
+            // Only if Mo-Fr (1-5)
+            if (dow >= 1 && dow <= 5) {
+              const exists = fetchedEntries.some(e => e.date === dateStr && e.type === 'special_holiday' as any);
+              if (!exists) {
+                virtualEntries.push({
+                  id: `virtual-${dateStr}-special`,
+                  user_id: user?.id || '',
+                  date: dateStr,
+                  client_name: 'Sonderurlaub',
+                  type: 'special_holiday' as any,
+                  hours: getDailyTargetForDate(dateStr, userTargetHours), // Calculated correctly based on halved target
+                  note: 'Automatisch: ½ Tag Sonderurlaub',
+                  created_at: new Date().toISOString(),
+                  start_time: '',
+                  end_time: ''
+                });
+              }
+            }
+          });
+        });
+
+        // Add virtuals
+        return [...fetchedEntries, ...virtualEntries].sort((a, b) => b.date.localeCompare(a.date));
+      });
     }
 
     let userToCheck = customUserId || user?.id;

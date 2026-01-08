@@ -633,6 +633,7 @@ const EntryPage: React.FC = () => {
             case 'holiday': return <PartyPopper size={20} />;
             case 'unpaid': return <Ban size={20} />;
             case 'overtime_reduction': return <TrendingDown size={20} />;
+            case 'special_holiday': return <PartyPopper size={20} className="text-teal-300" />;
             default: return <Briefcase size={20} />;
         }
     };
@@ -661,6 +662,29 @@ const EntryPage: React.FC = () => {
                 </h1>
                 <p className="text-white/50 text-sm md:text-lg mt-1">Erfasse deine Arbeitszeit schnell und einfach.</p>
             </header>
+
+            {/* HOLIDAY SPECIAL NOTICE */}
+            {(() => {
+                const d = new Date(date);
+                const isSpecial = d.getMonth() === 11 && (d.getDate() === 24 || d.getDate() === 31);
+                const isWeekday = d.getDay() >= 1 && d.getDay() <= 5;
+                if (isSpecial && isWeekday) {
+                    return (
+                        <div className="mb-6 p-4 rounded-xl bg-gradient-to-r from-teal-900/40 to-emerald-900/40 border border-teal-500/30 flex items-center gap-4 animate-in slide-in-from-top-2">
+                            <div className="p-3 bg-teal-500/20 rounded-full text-teal-300">
+                                <PartyPopper size={24} />
+                            </div>
+                            <div>
+                                <h3 className="text-teal-200 font-bold text-sm md:text-base">Sonderregelung {d.getDate()}.12.</h3>
+                                <p className="text-teal-100/70 text-xs md:text-sm">
+                                    Heute gilt: Halber Arbeitstag & halber Tag Sonderurlaub gutgeschrieben! 🎄🎆
+                                </p>
+                            </div>
+                        </div>
+                    );
+                }
+                return null;
+            })()}
 
             {/* --- OVERLAP WARNING MODAL --- */}
             {overlapWarning.isOpen && (

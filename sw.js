@@ -1,4 +1,4 @@
-const CACHE_NAME = 'zeiterfassung-v50';
+const CACHE_NAME = 'zeiterfassung-v51';
 const ASSETS = [
   '/',
   '/index.html',

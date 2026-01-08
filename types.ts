@@ -9,7 +9,7 @@ export interface TimeEntry {
   start_time?: string; // "HH:MM"
   end_time?: string;   // "HH:MM"
   note?: string;       // Projekt-Notiz
-  type?: 'work' | 'break' | 'company' | 'office' | 'warehouse' | 'car' | 'vacation' | 'sick' | 'holiday' | 'unpaid' | 'overtime_reduction' | 'sick_child' | 'sick_pay'; // Erweitert um Abwesenheiten
+  type?: 'work' | 'break' | 'company' | 'office' | 'warehouse' | 'car' | 'vacation' | 'sick' | 'holiday' | 'unpaid' | 'overtime_reduction' | 'sick_child' | 'sick_pay' | 'special_holiday'; // Erweitert um Abwesenheiten
   created_at: string;
   submitted?: boolean;
   confirmed_by?: string; // ID des Bestätigers
