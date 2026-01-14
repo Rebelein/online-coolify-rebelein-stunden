@@ -1086,7 +1086,25 @@ const OfficeUserPage: React.FC = () => {
                                                             <span className="w-1 h-1 rounded-full bg-white/20"></span>
                                                             <span className="uppercase">{entry.type === 'overtime_reduction' ? 'Abbau' : entry.type === 'emergency_service' ? 'Notdienst' : entry.type}</span>
                                                             {entry.type === 'emergency_service' && entry.surcharge && entry.surcharge > 0 && <span className="ml-2 text-rose-300 font-bold bg-rose-500/20 px-1.5 rounded text-[10px]">+{entry.surcharge}%</span>}
+                                                            {entry.responsible_user_id && (
+                                                                <>
+                                                                    <span className="ml-2 w-1 h-1 rounded-full bg-white/20"></span>
+                                                                    <span className="flex items-center gap-1 text-teal-300 font-bold">
+                                                                        <UserCheck size={10} />
+                                                                        {(() => {
+                                                                            const confirmingUser = users.find(u => u.user_id === entry.responsible_user_id);
+                                                                            return `Bestätigt von ${confirmingUser ? confirmingUser.display_name : 'Unbekannt'}`;
+                                                                        })()}
+                                                                    </span>
+                                                                </>
+                                                            )}
                                                         </div>
+                                                        {entry.note && (
+                                                            <div className="flex items-start gap-1 text-white/40 text-[10px] italic mt-1 max-w-[200px] leading-tight">
+                                                                <StickyNote size={10} className="mt-0.5 shrink-0" />
+                                                                <span>"{entry.note}"</span>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-3">

@@ -511,7 +511,13 @@ const AnalysisPage: React.FC = () => {
                 status = 'weekend';
             }
 
-            grid.push({ day: d, type: 'work', status, hours: totalHours });
+            // Calculate Difference for Display
+            // Note: For regular days, diff = totalHours - target
+            // But if target is 0 (weekend), we don't necessarily show "overtime" unless desired.
+            // Requirement says: "minus hours based on target working time".
+            const diff = totalHours - target;
+
+            grid.push({ day: d, type: 'work', status, hours: totalHours, diff, target }); // Added diff and target
         }
         return grid;
     }, [viewMode, year, month, entries, absences, settings.target_hours, effectiveStartDate]);
@@ -799,7 +805,16 @@ const AnalysisPage: React.FC = () => {
                                             className={`h-12 md:h-14 rounded-lg border flex flex-col items-center justify-center relative ${getDayColor(item)} transition-transform hover:scale-105`}
                                         >
                                             <span className="font-bold text-sm leading-none">{item.day}</span>
-                                            {item.type === 'work' && (item as any).status !== 'overtime_reduction' && (item as any).hours > 0 && <span className="text-[10px] opacity-70 mt-1">{(item as any).hours.toFixed(2).replace('.', ',')}</span>}
+                                            {item.type === 'work' && (item as any).status !== 'overtime_reduction' && (item as any).hours > 0 && (
+                                                <div className="flex flex-col items-center">
+                                                    <span className="text-[10px] opacity-70 mt-1">{(item as any).hours.toFixed(2).replace('.', ',')}</span>
+                                                    {(item as any).target > 0 && (item as any).diff !== 0 && (
+                                                        <span className={`text-[9px] font-bold ${(item as any).diff > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                            {(item as any).diff > 0 ? '+' : ''}{(item as any).diff.toFixed(2).replace('.', ',')}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            )}
                                             {item.type === 'work' && (item as any).status === 'overtime_reduction' && <div className="mt-1"><TrendingDown size={10} className="opacity-70" /></div>}
                                             {item.type === 'absence' && (
                                                 <div className="mt-1">
