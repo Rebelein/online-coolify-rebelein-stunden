@@ -77,10 +77,10 @@ const OfficeUserListPage: React.FC = () => {
 
     // Check which departments the current user is responsible for
     const responsibleDepartments = useMemo(() => {
-        if (!currentUser) return [];
+        if (!currentUser || !currentUser.user_id) return [];
         return departments.filter(d =>
             d.responsible_user_id === currentUser.user_id ||
-            (d.additional_responsible_ids && d.additional_responsible_ids.includes(currentUser.user_id))
+            (d.additional_responsible_ids && currentUser.user_id && d.additional_responsible_ids.includes(currentUser.user_id))
         );
     }, [departments, currentUser]);
 
@@ -543,7 +543,7 @@ const OfficeUserListPage: React.FC = () => {
                                                 >
                                                     <option value="" className="bg-slate-900 text-slate-400">+ Hinzufügen</option>
                                                     {users
-                                                        .filter(u => u.user_id !== dept.responsible_user_id && !(dept.additional_responsible_ids || []).includes(u.user_id))
+                                                        .filter(u => u.user_id && u.user_id !== dept.responsible_user_id && !(dept.additional_responsible_ids || []).includes(u.user_id))
                                                         .map(u => (
                                                             <option key={u.user_id} value={u.user_id} className="bg-slate-900 text-slate-200">{u.display_name}</option>
                                                         ))}
