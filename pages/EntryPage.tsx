@@ -457,8 +457,17 @@ const EntryPage: React.FC = () => {
         setShowTypeMenu(false);
     };
 
-    // --- Long Press Handlers ---
+    // --- Long Press Handlers (Improved for Hybrid Touch/Mouse) ---
+    const isTouchInteraction = useRef(false);
+
     const handleButtonDown = (e: React.MouseEvent | React.TouchEvent) => {
+        // Prevent double firing on hybrid devices
+        if (e.type === 'touchstart') {
+            isTouchInteraction.current = true;
+        } else if (e.type === 'mousedown' && isTouchInteraction.current) {
+            return;
+        }
+
         isLongPress.current = false;
         longPressTimer.current = setTimeout(() => {
             isLongPress.current = true;
@@ -467,6 +476,13 @@ const EntryPage: React.FC = () => {
     };
 
     const handleButtonUp = (e: React.MouseEvent | React.TouchEvent) => {
+        // Prevent double firing
+        if (e.type === 'touchend') {
+            e.preventDefault(); // Stop browser from firing click/mousedown
+        } else if (e.type === 'mouseup' && isTouchInteraction.current) {
+            return;
+        }
+
         if (longPressTimer.current) {
             clearTimeout(longPressTimer.current);
             longPressTimer.current = null;
@@ -481,6 +497,11 @@ const EntryPage: React.FC = () => {
             }
         }
         isLongPress.current = false;
+
+        // Reset touch interaction flag after a delay to allow future mouse interactions if mixed usage
+        if (e.type === 'touchend') {
+            setTimeout(() => { isTouchInteraction.current = false; }, 1000);
+        }
     };
 
     const handleButtonLeave = () => {
@@ -1803,8 +1824,8 @@ const EntryPage: React.FC = () => {
                                 <Percent size={20} />
                                 <span className="font-semibold uppercase text-xs tracking-wider">Zuschlag</span>
                             </div>
-                            <div className="grid grid-cols-3 gap-3">
-                                {[25, 50, 100].map(val => (
+                            <div className="grid grid-cols-2 gap-3">
+                                {[50, 100].map(val => (
                                     <button
                                         key={val}
                                         type="button"

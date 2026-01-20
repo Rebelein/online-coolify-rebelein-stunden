@@ -2,12 +2,13 @@
 import React from 'react';
 import { PlusCircle, Calendar, PieChart, Settings, LogOut, LayoutDashboard, Users, Presentation, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useSettings } from '../services/dataService';
+import { useSettings, useDashboardStats } from '../services/dataService';
 
 const BottomNav: React.FC = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const { settings, logout } = useSettings();
+    const { totalCount } = useDashboardStats();
 
     // SIDEBAR EXPANSION STATE (PERSISTED)
     const [isExpanded, setIsExpanded] = React.useState(() => {
@@ -24,7 +25,7 @@ const BottomNav: React.FC = () => {
     // Check Role
     const isOfficeOrAdmin = settings.role === 'admin' || settings.role === 'office';
 
-    const NavItem = ({ path, icon: Icon, label, onClick, colorClass }: { path?: string; icon: any; label: string; onClick?: () => void, colorClass?: string }) => {
+    const NavItem = ({ path, icon: Icon, label, onClick, colorClass, badgeCount }: { path?: string; icon: any; label: string; onClick?: () => void, colorClass?: string, badgeCount?: number }) => {
         const isActive = path ? location.pathname === path : false;
 
         const handleClick = () => {
@@ -46,16 +47,30 @@ const BottomNav: React.FC = () => {
         `}
                 title={!isExpanded ? label : undefined}
             >
-                <Icon size={24} strokeWidth={isActive ? 2.5 : 1.5} className="transition-transform group-hover:scale-110 flex-shrink-0" />
+                <div className="relative">
+                    <Icon size={24} strokeWidth={isActive ? 2.5 : 1.5} className="transition-transform group-hover:scale-110 flex-shrink-0" />
+                    {!isExpanded && badgeCount !== undefined && badgeCount > 0 && (
+                        <div className="absolute -top-2 -right-2 min-w-[18px] h-[18px] bg-teal-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-gray-900 z-10 px-1 shadow-sm">
+                            {badgeCount > 99 ? '99+' : badgeCount}
+                        </div>
+                    )}
+                </div>
 
                 {/* Mobile Label */}
                 <span className="text-[10px] mt-1 font-medium md:hidden">{label}</span>
 
                 {/* Desktop Label (Only if Expanded) */}
                 {isExpanded && (
-                    <span className="hidden md:block text-sm font-medium whitespace-nowrap animate-in fade-in slide-in-from-left-2 duration-300">
-                        {label}
-                    </span>
+                    <div className="hidden md:flex flex-col items-start animate-in fade-in slide-in-from-left-2 duration-300">
+                        <span className="text-sm font-medium whitespace-nowrap">
+                            {label}
+                        </span>
+                        {(badgeCount !== undefined && badgeCount > 0) && (
+                            <span className="text-[10px] font-bold text-teal-400 leading-none mt-0.5">
+                                {badgeCount} Aufgaben
+                            </span>
+                        )}
+                    </div>
                 )}
 
                 {/* Desktop Tooltip / Indicator (Only if Collapsed) */}
@@ -121,7 +136,7 @@ const BottomNav: React.FC = () => {
 
                         {isOfficeOrAdmin && (
                             <>
-                                <NavItem path="/office" icon={LayoutDashboard} label="Dashboard" colorClass="text-orange-400/70" />
+                                <NavItem path="/office" icon={LayoutDashboard} label="Dashboard" colorClass="text-orange-400/70" badgeCount={totalCount} />
                                 <NavItem path="/office/users" icon={Users} label="Benutzer" colorClass="text-orange-400/70" />
                                 <NavItem path="/office/analysis" icon={Presentation} label="Profi-Auswertung" colorClass="text-purple-400/70" />
                             </>

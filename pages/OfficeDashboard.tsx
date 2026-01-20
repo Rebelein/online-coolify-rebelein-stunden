@@ -45,7 +45,7 @@ const OfficeDashboard: React.FC = () => {
                 const userRole = found?.role || 'installer';
 
                 // Fetch Initial
-                fetchDashboardData(userId, userRole);
+                fetchDashboardData(userId, userRole, false);
 
                 // Realtime Subscription
                 channel = supabase
@@ -54,8 +54,16 @@ const OfficeDashboard: React.FC = () => {
                         'postgres_changes',
                         { event: '*', schema: 'public', table: 'time_entries' },
                         () => {
-                            console.log("Realtime Update triggering fetchDashboardData...");
-                            fetchDashboardData(userId, userRole);
+                            console.log("Realtime Update (TimeEntries) triggering fetchDashboardData...");
+                            fetchDashboardData(userId, userRole, true);
+                        }
+                    )
+                    .on(
+                        'postgres_changes',
+                        { event: '*', schema: 'public', table: 'vacation_requests' },
+                        () => {
+                            console.log("Realtime Update (VacationRequests) triggering fetchDashboardData...");
+                            fetchDashboardData(userId, userRole, true);
                         }
                     )
                     .subscribe();
@@ -69,9 +77,9 @@ const OfficeDashboard: React.FC = () => {
         };
     }, [users.length]); // Dependency on users length to ensure we try again if users load late
 
-    const fetchDashboardData = async (userId: string, role: string) => {
-        setLoading(true);
-        console.log("Fetching dashboard data for:", userId, role);
+    const fetchDashboardData = async (userId: string, role: string, isBackgroundUpdate = false) => {
+        if (!isBackgroundUpdate) setLoading(true);
+        console.log("Fetching dashboard data for:", userId, role, isBackgroundUpdate ? "(Background)" : "(Initial)");
 
         // 1. MY PENDING CHANGES (As Employee: entries changed by admin/office waiting for MY confirmation)
         // Fields: change_confirmed_by_user = false AND last_changed_by != me
@@ -245,7 +253,7 @@ const OfficeDashboard: React.FC = () => {
                     </h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {myPendingChanges.map(entry => (
-                            <GlassCard key={entry.id} className="border-orange-500/30 bg-orange-900/10 hover:border-orange-500/50 transition-colors">
+                            <GlassCard key={entry.id} className="animate-in fade-in zoom-in-95 duration-500 border-orange-500/30 bg-orange-900/10 hover:border-orange-500/50 transition-colors">
                                 <div className="flex justify-between items-start mb-2">
                                     <span className="text-xs font-bold text-orange-300 uppercase tracking-wider">
                                         {new Date(entry.date).toLocaleDateString('de-DE')}
@@ -291,7 +299,7 @@ const OfficeDashboard: React.FC = () => {
                                 {pendingVacationRequests.map(req => {
                                     const requester = users.find(u => u.user_id === req.user_id);
                                     return (
-                                        <GlassCard key={req.id} className="border-purple-500/30 bg-purple-900/10 cursor-pointer hover:bg-purple-900/20 transition-colors" onClick={() => navigate(`/office/user/${req.user_id}`)}>
+                                        <GlassCard key={req.id} className="animate-in fade-in zoom-in-95 duration-500 border-purple-500/30 bg-purple-900/10 cursor-pointer hover:bg-purple-900/20 transition-colors" onClick={() => navigate(`/office/user/${req.user_id}`)}>
                                             <div className="flex items-center gap-3 mb-3">
                                                 <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center font-bold text-purple-300 text-lg border border-purple-500/30">
                                                     {requester?.display_name.charAt(0) || '?'}
@@ -347,7 +355,7 @@ const OfficeDashboard: React.FC = () => {
                                         const reviewer = users.find(u => u.user_id === entry.responsible_user_id);
 
                                         return (
-                                            <GlassCard key={entry.id} className="!p-4 bg-teal-900/5 border-teal-500/20 hover:border-teal-500/40 relative overflow-hidden group/card">
+                                            <GlassCard key={entry.id} className="animate-in fade-in zoom-in-95 duration-500 !p-4 bg-teal-900/5 border-teal-500/20 hover:border-teal-500/40 relative overflow-hidden group/card">
                                                 <div className="absolute top-0 right-0 p-2 opacity-50">
                                                     <Clock size={40} className="text-teal-500/10" />
                                                 </div>

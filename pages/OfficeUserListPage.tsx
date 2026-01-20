@@ -470,8 +470,15 @@ const OfficeUserListPage: React.FC = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {departments.map(dept => {
                             const isResponsible = dept.responsible_user_id === currentUser?.user_id;
-                            const canEdit = isAdmin || isResponsible;
 
+                            // Permission Split:
+                            // 1. Substitute Management: Admin OR Responsible User
+                            const canManageSubstitute = isAdmin || isResponsible;
+                            // 2. Retroactive Settings: Admin ONLY
+                            const canManageRetro = isAdmin;
+
+                            // canEdit is deprecated/ambiguous, we use specific flags now.
+                            // But we keep the loop filter:
                             if (!isAdmin && !isResponsible) return null;
 
                             return (
@@ -593,7 +600,7 @@ const OfficeUserListPage: React.FC = () => {
                                                     <Shield size={10} /> Vertretung (Aktuell)
                                                 </label>
                                                 {/* Active Switch */}
-                                                {canEdit && (
+                                                {canManageSubstitute && (
                                                     <button
                                                         onClick={() => updateDepartment(dept.id, { is_substitute_active: !dept.is_substitute_active })}
                                                         className={`flex items-center gap-2 px-2 py-1 rounded-full text-[10px] font-bold transition-all border ${dept.is_substitute_active
@@ -606,7 +613,7 @@ const OfficeUserListPage: React.FC = () => {
                                                 )}
                                             </div>
 
-                                            {canEdit ? (
+                                            {canManageSubstitute ? (
                                                 <div className="relative">
                                                     <select
                                                         className="w-full bg-slate-950/40 text-white text-xs rounded-lg border border-teal-500/10 px-2 py-2 focus:border-teal-500 focus:bg-slate-950/60 outline-none appearance-none cursor-pointer transition-colors"
@@ -633,7 +640,7 @@ const OfficeUserListPage: React.FC = () => {
                                                 <label className="text-[10px] text-orange-200/70 uppercase font-bold flex items-center gap-1.5">
                                                     <Clock size={10} /> Rückwirkend
                                                 </label>
-                                                {canEdit && (
+                                                {canManageRetro && (
                                                     <button
                                                         onClick={() => updateDepartment(dept.id, { is_retro_substitute_active: !dept.is_retro_substitute_active })}
                                                         className={`flex items-center gap-2 px-2 py-1 rounded-full text-[10px] font-bold transition-all border ${dept.is_retro_substitute_active
@@ -650,7 +657,7 @@ const OfficeUserListPage: React.FC = () => {
                                                 {/* Chef Retro */}
                                                 <div>
                                                     <label className="text-[9px] text-white/30 uppercase font-bold block mb-1 ml-1">Chef</label>
-                                                    {canEdit ? (
+                                                    {canManageRetro ? (
                                                         <div className="relative">
                                                             <select
                                                                 className="w-full bg-slate-950/40 text-orange-100 text-[11px] rounded-lg border border-orange-500/10 p-1.5 focus:border-orange-500/50 outline-none appearance-none cursor-pointer"
@@ -673,7 +680,7 @@ const OfficeUserListPage: React.FC = () => {
                                                 {/* Substitute Retro */}
                                                 <div>
                                                     <label className="text-[9px] text-white/30 uppercase font-bold block mb-1 ml-1">Vertr.</label>
-                                                    {canEdit ? (
+                                                    {canManageRetro ? (
                                                         <div className="relative">
                                                             <select
                                                                 className="w-full bg-slate-950/40 text-orange-100 text-[11px] rounded-lg border border-orange-500/10 p-1.5 focus:border-orange-500/50 outline-none appearance-none cursor-pointer"

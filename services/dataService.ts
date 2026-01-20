@@ -1467,3 +1467,71 @@ export const useOvertimeBalance = (userId: string) => {
 
   return { entries, loading, addEntry, refresh: fetchEntries };
 };
+
+export const useDashboardStats = () => {
+  const [stats, setStats] = useState<{ totalCount: number, loading: boolean }>({ totalCount: 0, loading: true });
+
+  const fetchStats = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: userSettings } = await supabase.from('user_settings').select('role').eq('user_id', user.id).single();
+    const role = userSettings?.role || 'installer';
+    const isOfficeOrAdmin = role === 'admin' || role === 'office';
+
+    let total = 0;
+
+    // 1. My Pending Changes (Everyone)
+    const { count: myChangesCount } = await supabase
+      .from('time_entries')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('change_confirmed_by_user', false)
+      .neq('last_changed_by', user.id);
+
+    total += (myChangesCount || 0);
+
+    if (isOfficeOrAdmin) {
+      // 2. Unconfirmed Entries
+      const { data: unconfirmed } = await supabase
+        .from('time_entries')
+        .select('type, late_reason, responsible_user_id')
+        .is('confirmed_at', null)
+        .is('rejected_at', null);
+
+      if (unconfirmed) {
+        const confirmationTypes = ['company', 'office', 'warehouse', 'car', 'overtime_reduction'];
+        const actionable = unconfirmed.filter(e => {
+          const isApprovalType = (confirmationTypes.includes(e.type || '') && !e.late_reason);
+          const isAssigned = !!e.responsible_user_id;
+          const isLate = !!e.late_reason;
+          return isApprovalType || isAssigned || isLate;
+        });
+        total += actionable.length;
+      }
+
+      // 3. Vacation Requests
+      const { count: vacationCount } = await supabase
+        .from('vacation_requests')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending');
+
+      total += (vacationCount || 0);
+    }
+
+    setStats({ totalCount: total, loading: false });
+  }, []);
+
+  useEffect(() => {
+    fetchStats();
+
+    const channel = supabase.channel('dashboard_stats')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'time_entries' }, () => fetchStats())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vacation_requests' }, () => fetchStats())
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchStats]);
+
+  return stats;
+};
