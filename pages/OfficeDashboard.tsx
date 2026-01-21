@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import {
     Activity, ArrowRight, CheckCircle, Clock, FileText,
     LayoutDashboard, UserCheck, Shield, ChevronRight, AlertTriangle,
-    Palmtree, Briefcase, Truck, Home, Calculator, X, MessageCircle
+    Palmtree, Briefcase, Truck, Home, Calculator, X, MessageCircle, Hash, ChevronDown
 } from 'lucide-react';
 import { TimeEntry, UserSettings, UserAbsence, VacationRequest } from '../types';
 
@@ -26,7 +26,29 @@ const OfficeDashboard: React.FC = () => {
 
     // Modal State
     const [reviewModal, setReviewModal] = useState<{ isOpen: boolean, userId: string | null }>({ isOpen: false, userId: null });
-    const [rejectionState, setRejectionState] = useState<{ entryId: string | null, reason: string }>({ entryId: null, reason: '' });
+    const [rejectionState, setRejectionState] = useState<{ entryId: string | null; reason: string }>({ entryId: null, reason: '' });
+
+    // Collapsible Sections State
+    const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('dashboard_collapsed');
+            return saved ? JSON.parse(saved) : {};
+        }
+        return {};
+    });
+
+    const toggleSection = (section: string) => {
+        setCollapsedSections(prev => {
+            const next = { ...prev, [section]: !prev[section] };
+            localStorage.setItem('dashboard_collapsed', JSON.stringify(next));
+            return next;
+        });
+    };
+
+    const [expandedVacationUsers, setExpandedVacationUsers] = useState<string[]>([]);
+    const toggleVacationUser = (userId: string) => {
+        setExpandedVacationUsers(prev => prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]);
+    };
 
     // Initial Load & Realtime Subscription
     useEffect(() => {
@@ -182,6 +204,16 @@ const OfficeDashboard: React.FC = () => {
         return groups;
     }, [pendingConfirmations]);
 
+    // Group Vacation Requests by User
+    const vacationRequestsByUser = useMemo(() => {
+        const groups: Record<string, VacationRequest[]> = {};
+        pendingVacationRequests.forEach(req => {
+            if (!groups[req.user_id]) groups[req.user_id] = [];
+            groups[req.user_id].push(req);
+        });
+        return groups;
+    }, [pendingVacationRequests]);
+
 
     const isOfficeOrAdmin = currentUser?.role === 'admin' || currentUser?.role === 'office';
 
@@ -289,46 +321,92 @@ const OfficeDashboard: React.FC = () => {
             {isOfficeOrAdmin && (
                 <>
                     {/* Vacation Requests */}
+                    {/* Vacation Requests */}
                     {pendingVacationRequests.length > 0 && (
                         <div className="animate-in slide-in-from-bottom-5">
-                            <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                                <Palmtree size={24} className="text-purple-400" />
-                                <span className="text-purple-100">Offene Urlaubsanträge</span>
-                            </h2>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {pendingVacationRequests.map(req => {
-                                    const requester = users.find(u => u.user_id === req.user_id);
-                                    return (
-                                        <GlassCard key={req.id} className="animate-in fade-in zoom-in-95 duration-500 border-purple-500/30 bg-purple-900/10 cursor-pointer hover:bg-purple-900/20 transition-colors" onClick={() => navigate(`/office/user/${req.user_id}`)}>
-                                            <div className="flex items-center gap-3 mb-3">
-                                                <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center font-bold text-purple-300 text-lg border border-purple-500/30">
-                                                    {requester?.display_name.charAt(0) || '?'}
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-bold text-white leading-tight">{requester?.display_name || 'Unbekannt'}</h3>
-                                                    <p className="text-xs text-purple-300 font-medium">Antrag vom {new Date(req.created_at).toLocaleDateString('de-DE')}</p>
-                                                </div>
+                            <button
+                                onClick={() => toggleSection('vacation')}
+                                className="w-full text-left mb-4 flex items-center gap-2 group focus:outline-none"
+                            >
+                                <div className={`p-1 rounded transition-colors ${collapsedSections['vacation'] ? 'text-white/30 group-hover:bg-white/10' : 'text-purple-400'}`}>
+                                    {collapsedSections['vacation'] ? <ChevronRight size={24} /> : <ChevronDown size={24} />}
+                                </div>
+                                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                                    <Palmtree size={24} className="text-purple-400" />
+                                    <span className="text-purple-100">Offene Urlaubsanträge</span>
+                                    <span className="text-sm bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full ml-2">
+                                        {pendingVacationRequests.length}
+                                    </span>
+                                </h2>
+                            </button>
+
+                            {!collapsedSections['vacation'] && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pl-2 border-l-2 border-purple-500/10 mb-8">
+                                    {Object.keys(vacationRequestsByUser).map(userId => {
+                                        const userRequests = vacationRequestsByUser[userId];
+                                        const requester = users.find(u => u.user_id === userId);
+                                        const isExpanded = expandedVacationUsers.includes(userId);
+
+                                        return (
+                                            <div key={userId} className="contents">
+                                                <GlassCard
+                                                    className={`border-purple-500/30 bg-purple-900/10 cursor-pointer hover:bg-purple-900/20 transition-all group ${isExpanded ? 'lg:col-span-3 md:col-span-2' : ''}`}
+                                                    onClick={() => toggleVacationUser(userId)}
+                                                >
+                                                    <div className="flex justify-between items-start">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center font-bold text-purple-300 text-lg border border-purple-500/30">
+                                                                {requester?.display_name.charAt(0) || '?'}
+                                                            </div>
+                                                            <div>
+                                                                <h3 className="font-bold text-white leading-tight">{requester?.display_name || 'Unbekannt'}</h3>
+                                                                <p className="text-xs text-purple-300 font-medium">{userRequests.length} offene Anträge</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className={`text-white/30 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>
+                                                            <ChevronRight size={20} />
+                                                        </div>
+                                                    </div>
+
+                                                    {isExpanded && (
+                                                        <div className="mt-4 pt-4 border-t border-white/5 space-y-3 animate-in slide-in-from-top-2">
+                                                            {userRequests.map(req => (
+                                                                <div key={req.id} className="bg-black/20 rounded-lg p-3 hover:bg-black/30 transition-colors cursor-default" onClick={(e) => e.stopPropagation()}>
+                                                                    <div className="flex justify-between items-center mb-2">
+                                                                        <span className="text-xs text-white/50">Antrag vom {new Date(req.created_at).toLocaleDateString('de-DE')}</span>
+                                                                        <button
+                                                                            onClick={() => navigate(`/office/user/${req.user_id}`)}
+                                                                            className="text-xs text-purple-400 font-bold hover:underline flex items-center gap-1"
+                                                                        >
+                                                                            Bearbeiten <ChevronRight size={12} />
+                                                                        </button>
+                                                                    </div>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <div>
+                                                                            <span className="block text-[10px] text-white/40 uppercase font-bold">Start</span>
+                                                                            <span className="text-sm font-bold text-white">{new Date(req.start_date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span>
+                                                                        </div>
+                                                                        <ArrowRight size={14} className="text-white/20" />
+                                                                        <div className="text-right">
+                                                                            <span className="block text-[10px] text-white/40 uppercase font-bold">Ende</span>
+                                                                            <span className="text-sm font-bold text-white">{new Date(req.end_date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    {req.note && (
+                                                                        <div className="mt-2 text-xs text-white/50 italic border-l-2 border-white/10 pl-2">
+                                                                            "{req.note}"
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </GlassCard>
                                             </div>
-                                            <div className="flex justify-between items-center bg-black/20 rounded-lg p-3">
-                                                <div className="text-center">
-                                                    <span className="block text-[10px] text-white/40 uppercase font-bold">Start</span>
-                                                    <span className="text-sm font-bold text-white">{new Date(req.start_date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</span>
-                                                </div>
-                                                <ArrowRight size={14} className="text-white/20" />
-                                                <div className="text-center">
-                                                    <span className="block text-[10px] text-white/40 uppercase font-bold">Ende</span>
-                                                    <span className="text-sm font-bold text-white">{new Date(req.end_date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</span>
-                                                </div>
-                                            </div>
-                                            <div className="mt-3 text-right">
-                                                <span className="text-xs text-purple-400 font-bold hover:underline flex items-center justify-end gap-1">
-                                                    Bearbeiten <ChevronRight size={12} />
-                                                </span>
-                                            </div>
-                                        </GlassCard>
-                                    );
-                                })}
-                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -371,8 +449,17 @@ const OfficeDashboard: React.FC = () => {
                                                                 {entry.hours.toFixed(2)} Std.
                                                             </div>
                                                         </div>
-                                                        <div className="font-bold text-white text-sm truncate mb-1" title={entry.client_name}>
+                                                        <div className="font-bold text-white text-sm truncate mb-1 flex items-center gap-2" title={entry.client_name}>
                                                             {entry.client_name}
+                                                            {entry.order_number && (
+                                                                <span
+                                                                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(entry.order_number || ''); }}
+                                                                    className="inline-flex items-center gap-0.5 bg-white/10 px-1.5 py-0.5 rounded text-[10px] text-white/50 font-mono tracking-wide border border-white/5 shrink-0 cursor-pointer hover:bg-white/20 active:scale-95 transition-all"
+                                                                    title="Klicken zum Kopieren"
+                                                                >
+                                                                    {entry.order_number}
+                                                                </span>
+                                                            )}
                                                         </div>
                                                         {entry.note && (
                                                             <div className="text-xs text-white/50 italic truncate" title={entry.note}>

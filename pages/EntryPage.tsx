@@ -4,7 +4,7 @@ import { useTimeEntries, useSettings, useDailyLogs, useAbsences, useInstallers, 
 import { supabase } from '../services/supabaseClient'; // Ensure supabase is imported
 import { GlassCard, GlassInput, GlassButton } from '../components/GlassCard';
 import GlassDatePicker from '../components/GlassDatePicker';
-import { PlusCircle, Save, X, Calendar, ChevronLeft, ChevronRight, Clock, Coffee, Building, Briefcase, Truck, Sun, Heart, AlertCircle, AlertTriangle, CheckCircle, Info, Lock, History, User, FileText, Palmtree, UserX, Copy, Loader2, RefreshCw, Send, ArrowLeft, Trash2, CalendarDays, Plus, ChevronDown, ChevronUp, ArrowRight, MessageSquareText, StickyNote, Building2, Warehouse, Car, Stethoscope, PartyPopper, Ban, TrendingDown, Play, Square, UserCheck, Check, UserPlus, ArrowLeftRight, Baby, Coins, PiggyBank, Siren, Percent, ShieldAlert, Edit2, XCircle } from 'lucide-react';
+import { PlusCircle, Save, X, Calendar, ChevronLeft, ChevronRight, Clock, Coffee, Building, Briefcase, Truck, Sun, Heart, AlertCircle, AlertTriangle, CheckCircle, Info, Lock, History, User, FileText, Palmtree, UserX, Copy, Loader2, RefreshCw, Send, ArrowLeft, Trash2, CalendarDays, Plus, ChevronDown, ChevronUp, ArrowRight, MessageSquareText, StickyNote, Building2, Warehouse, Car, Stethoscope, PartyPopper, Ban, TrendingDown, Play, Square, UserCheck, Check, UserPlus, ArrowLeftRight, Baby, Coins, PiggyBank, Siren, Percent, ShieldAlert, Edit2, XCircle, Hash } from 'lucide-react';
 import { TimeSegment, QuotaChangeNotification, TimeEntry } from '../types';
 import { formatDuration, getGracePeriodDate } from '../services/utils/timeUtils';
 
@@ -138,6 +138,10 @@ const EntryPage: React.FC = () => {
 
     // Edit State
     const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+
+    // NEU: Order Number State
+    const [orderNumber, setOrderNumber] = useState('');
+    const [showOrderInput, setShowOrderInput] = useState(false);
 
     // NEU: State für verantwortlichen Monteur
     const [responsibleUserId, setResponsibleUserId] = useState<string>(() => {
@@ -423,6 +427,8 @@ const EntryPage: React.FC = () => {
             setHours('0');
             setProjectStartTime('');
             setProjectEndTime('');
+            setOrderNumber('');
+            setShowOrderInput(false);
         } else {
             // Restore start time if it was cleared (e.g. by passing through absence types) or is empty
             if (!projectStartTime) {
@@ -789,6 +795,8 @@ const EntryPage: React.FC = () => {
         setNote('');
         setProjectEndTime('');
         setResponsibleUserId('');
+        setOrderNumber('');
+        setShowOrderInput(false);
         setSurcharge(0);
         setLateEntryWarning({ isOpen: false, diffDays: 0, reason: '' }); // Reset Late Warning
         setIsSubmitting(false);
@@ -825,7 +833,8 @@ const EntryPage: React.FC = () => {
             type: entryType as any,
             responsible_user_id: finalResponsibleUserId,
             surcharge: entryType === 'emergency_service' ? surcharge : undefined,
-            late_reason: isLateEntry ? lateReason : (lateEntryWarning.reason || undefined)
+            late_reason: isLateEntry ? lateReason : (lateEntryWarning.reason || undefined),
+            order_number: orderNumber || undefined
         };
 
 
@@ -1639,23 +1648,62 @@ const EntryPage: React.FC = () => {
                                     placeholder={entryType === 'overtime_reduction' ? "Bemerkung..." : "Z.B. Baustelle Müller..."}
                                     value={client}
                                     onChange={(e) => setClient(e.target.value)}
+                                    onBlur={() => { if (client.length > 0) setShowOrderInput(true); }}
                                     required
-                                    className={`h-12 md:h-14 md:text-lg pr-12 ${entryType !== 'work' && entryType !== 'emergency_service' ? 'text-white/90' : ''}`}
+                                    className={`h-12 md:h-14 md:text-lg ${client.length > 0 && !showOrderInput ? 'pr-24' : 'pr-12'} ${entryType !== 'work' && entryType !== 'emergency_service' ? 'text-white/90' : ''}`}
                                 />
 
-                                {/* Cycle Type Button with Long Press */}
-                                <button
-                                    type="button"
-                                    onMouseDown={handleButtonDown}
-                                    onMouseUp={handleButtonUp}
-                                    onMouseLeave={handleButtonLeave}
-                                    onTouchStart={handleButtonDown}
-                                    onTouchEnd={handleButtonUp}
-                                    className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg transition-colors hover:bg-white/10`}
-                                    title="Typ ändern (gedrückt halten für Menü)"
+                                {/* Cycle Type Button with Long Press (Hidden if Order Input is open) */}
+                                {!showOrderInput && (
+                                    <button
+                                        type="button"
+                                        onMouseDown={handleButtonDown}
+                                        onMouseUp={handleButtonUp}
+                                        onMouseLeave={handleButtonLeave}
+                                        onTouchStart={handleButtonDown}
+                                        onTouchEnd={handleButtonUp}
+                                        className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg transition-colors hover:bg-white/10`}
+                                        title="Typ ändern (gedrückt halten für Menü)"
+                                    >
+                                        <ArrowLeftRight size={24} />
+                                    </button>
+                                )}
+
+                                {/* Order Number Toggle Trigger (Only when client text exists) */}
+                                {client.length > 0 && !showOrderInput && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowOrderInput(true)}
+                                        className="absolute right-14 top-1/2 -translate-y-1/2 p-2 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-all animate-in fade-in slide-in-from-right-2"
+                                        title="Auftragsnummer hinzufügen"
+                                    >
+                                        <Hash size={20} />
+                                    </button>
+                                )}
+
+                                {/* ORDER NUMBER SLIDING OVERLAY */}
+                                <div
+                                    className={`absolute top-0 right-0 h-full w-[75%] bg-slate-800/90 backdrop-blur-xl border-l border-white/20 shadow-[-10px_0_15px_-3px_rgba(0,0,0,0.3)] transition-all duration-300 ease-out z-20 flex items-center px-4 md:rounded-r-xl rounded-r-xl ${showOrderInput ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0 pointer-events-none'}`}
                                 >
-                                    <ArrowLeftRight size={24} />
-                                </button>
+                                    <Hash size={18} className="text-teal-400 mr-2 shrink-0" />
+                                    <input
+                                        type="text"
+                                        value={orderNumber}
+                                        onChange={(e) => setOrderNumber(e.target.value)}
+                                        placeholder="Auftragsnummer..."
+                                        className="bg-transparent border-none outline-none text-white h-full w-full placeholder-white/30"
+                                        autoFocus={showOrderInput}
+                                    />
+                                </div>
+
+                                {/* Click Overlay to Close Order Number (Covers the visible part of name input) */}
+                                {showOrderInput && (
+                                    <div
+                                        className="absolute top-0 left-0 w-[25%] h-full z-20 cursor-pointer hover:bg-white/5 transition-colors rounded-l-xl"
+                                        onClick={() => setShowOrderInput(false)}
+                                        title="Zurück zum Namen"
+                                    />
+                                )}
                             </div>
 
                             {/* MITARBEITER SELECT BUTTON (NEU) */}

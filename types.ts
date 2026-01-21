@@ -11,6 +11,7 @@ export interface TimeEntry {
   note?: string;       // Projekt-Notiz
   type?: 'work' | 'break' | 'company' | 'office' | 'warehouse' | 'car' | 'vacation' | 'sick' | 'holiday' | 'unpaid' | 'overtime_reduction' | 'sick_child' | 'sick_pay' | 'special_holiday' | 'emergency_service'; // Erweitert um Abwesenheiten & Notdienst
   surcharge?: number; // Zuschlag in % (25, 50, 100)
+  order_number?: string; // NEU: Auftragsnummer
   created_at: string;
   updated_at?: string; // Hinzugefügt
   submitted?: boolean;

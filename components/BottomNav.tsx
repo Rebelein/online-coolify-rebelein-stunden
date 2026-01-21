@@ -37,7 +37,7 @@ const BottomNav: React.FC = () => {
             <button
                 type="button"
                 onClick={handleClick}
-                className={`group flex items-center transition-all duration-300 relative cursor-pointer
+                className={`group flex items-center justify-center transition-all duration-300 relative cursor-pointer
             ${/* Mobile Styles (unchanged) */ ''}
             flex-col w-full h-full md:flex-row md:h-12 md:rounded-xl md:px-3 md:gap-3
             ${/* Desktop Styles */ ''}

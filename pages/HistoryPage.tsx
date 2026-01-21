@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useTimeEntries, useSettings, useDailyLogs, useAbsences, getDailyTargetForDate, getLocalISOString } from '../services/dataService';
 import { GlassCard, GlassButton, GlassInput } from '../components/GlassCard';
-import { Trash2, FileDown, X, Edit2, Save, CalendarDays, Briefcase, Clock, ChevronLeft, ChevronRight, CheckCircle, Calendar, UserCheck, List, FileText, StickyNote, Coffee, Lock, Hourglass, Building2, Building, Warehouse, Car, Palmtree, Stethoscope, Ban, PartyPopper, TrendingDown, AlertTriangle, Check, Siren, History as HistoryIcon, ThumbsUp, ThumbsDown, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Trash2, FileDown, X, Edit2, Save, CalendarDays, Briefcase, Clock, ChevronLeft, ChevronRight, CheckCircle, Calendar, UserCheck, List, FileText, StickyNote, Coffee, Lock, Hourglass, Building2, Building, Warehouse, Car, Palmtree, Stethoscope, Ban, PartyPopper, TrendingDown, AlertTriangle, Check, Siren, History as HistoryIcon, ThumbsUp, ThumbsDown, RefreshCw, ShieldAlert, Hash } from 'lucide-react';
 import GlassDatePicker from '../components/GlassDatePicker';
 import { TimeEntry, DailyLog, UserAbsence } from '../types';
 import { supabase } from '../services/supabaseClient';
@@ -26,7 +26,15 @@ const HistoryPage: React.FC = () => {
     const [activePdfDatePicker, setActivePdfDatePicker] = useState<'start' | 'end' | null>(null);
 
     const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
-    const [editForm, setEditForm] = useState({ date: '', client_name: '', hours: '', start_time: '', end_time: '', note: '' });
+    const [editForm, setEditForm] = useState<{
+        date: string;
+        client_name: string;
+        hours: string;
+        start_time: string;
+        end_time: string;
+        note: string;
+        order_number: string;
+    }>({ date: '', client_name: '', hours: '', start_time: '', end_time: '', note: '', order_number: '' });
 
     // NEU: State für das Löschen-Modal (statt window.confirm)
     const [entryToDelete, setEntryToDelete] = useState<TimeEntry | null>(null);
@@ -282,7 +290,8 @@ const HistoryPage: React.FC = () => {
             hours: entry.hours.toString(),
             start_time: entry.start_time || '',
             end_time: entry.end_time || '',
-            note: entry.note || ''
+            note: entry.note || '',
+            order_number: entry.order_number || ''
         });
     };
 
@@ -313,7 +322,8 @@ const HistoryPage: React.FC = () => {
             hours: parseFloat(editForm.hours.replace(',', '.')),
             start_time: editForm.start_time || undefined,
             end_time: editForm.end_time || undefined,
-            note: editForm.note || undefined
+            note: editForm.note || undefined,
+            order_number: editForm.order_number || undefined
         };
 
         await updateEntry(editingEntry.id, updates);
@@ -615,7 +625,10 @@ const HistoryPage: React.FC = () => {
                                             <GlassCard key={entry.id} className={`!p-3 flex flex-col justify-between group ${getEntryStyle(entry)}`}>
                                                 {editingEntry?.id === entry.id && !entry.isAbsence ? (
                                                     <div className="w-full space-y-2">
-                                                        <GlassInput type="text" value={editForm.client_name} onChange={e => setEditForm({ ...editForm, client_name: e.target.value })} className="!py-1 !text-sm h-8" />
+                                                        <div className="flex gap-2">
+                                                            <GlassInput type="text" value={editForm.client_name} onChange={e => setEditForm({ ...editForm, client_name: e.target.value })} className="!py-1 !text-sm h-8 flex-[2]" placeholder="Projekt..." />
+                                                            <GlassInput type="text" value={editForm.order_number} onChange={e => setEditForm({ ...editForm, order_number: e.target.value })} className="!py-1 !text-sm h-8 flex-1 font-mono text-white/70" placeholder="Auftrag #" />
+                                                        </div>
                                                         <div className="flex gap-1 items-center">
                                                             <GlassInput type="time" value={editForm.start_time} onChange={e => setEditForm({ ...editForm, start_time: e.target.value })} className="!py-1 !text-sm h-8 text-center flex-1" />
                                                             <span className="text-white/50">-</span>
@@ -655,6 +668,15 @@ const HistoryPage: React.FC = () => {
                                                                 }`}>
                                                                 {getEntryIcon(entry.type)}
                                                                 {entry.client_name}
+                                                                {entry.order_number && (
+                                                                    <span
+                                                                        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(entry.order_number || ''); }}
+                                                                        className="ml-2 inline-flex items-center gap-0.5 bg-white/10 px-1.5 py-0.5 rounded text-[10px] text-white/50 font-mono tracking-wide border border-white/5 cursor-pointer hover:bg-white/20 active:scale-95 transition-all"
+                                                                        title="Klicken zum Kopieren"
+                                                                    >
+                                                                        {entry.order_number}
+                                                                    </span>
+                                                                )}
                                                                 {entry.has_history && (
                                                                     <span title="Bearbeitungsverlauf vorhanden" className="ml-2 inline-flex">
                                                                         <HistoryIcon size={14} className="text-purple-300" />
