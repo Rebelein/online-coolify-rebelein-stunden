@@ -330,7 +330,7 @@ export const generateProjectPdfBlob = (data: ExportData, startDate: string, endD
 
         const tableData = dayEntries.map(e => {
             let durationMin = calculateDurationInMinutes(e.start_time || '', e.end_time || '', 0);
-            
+
             // Check for paid absence types with 0 duration
             const paidAbsenceTypes = ['vacation', 'sick', 'holiday', 'special_holiday'];
             if (durationMin === 0 && paidAbsenceTypes.includes(e.type || '')) {
@@ -346,9 +346,16 @@ export const generateProjectPdfBlob = (data: ExportData, startDate: string, endD
                 const totalMin = durationMin * (1 + e.surcharge / 100);
                 hoursStr = formatMinutesToDecimal(totalMin);
                 label = `Notdienst / ${e.client_name} (+${e.surcharge}%)`;
-                // Note: We can't easily modify the note displayed by didDrawCell without mutating e.
-                // But we can append to label if we want basics shown:
-                // label += ` [${e.hours}h + ${e.surcharge}%]`; 
+            }
+
+            // [UPDATED] Add Order Number
+            if (e.order_number) {
+                label += ` #${e.order_number}`;
+            }
+
+            // [UPDATED] Add Note on new line
+            if (e.note) {
+                label += `\n${e.note}`;
             }
 
             return [
@@ -369,7 +376,7 @@ export const generateProjectPdfBlob = (data: ExportData, startDate: string, endD
             head: [['Von', 'Bis', 'Baustelle - Tätigkeit', 'Std']],
             body: tableData,
             theme: 'grid',
-            styles: { fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.1, textColor: [0, 0, 0], cellPadding: 1.5 },
+            styles: { fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.1, textColor: [0, 0, 0], cellPadding: 1.5, overflow: 'linebreak' }, // Enabled linebreak
             headStyles: { fillColor: [50, 50, 50], textColor: [255, 255, 255], fontStyle: 'bold', lineWidth: 0.2, lineColor: [0, 0, 0] },
             columnStyles: {
                 0: { cellWidth: 20, halign: 'center' }, // Von
@@ -382,38 +389,18 @@ export const generateProjectPdfBlob = (data: ExportData, startDate: string, endD
                 if (cellText === 'Pause' && data.section === 'body') {
                     data.cell.styles.textColor = [150, 150, 150];
                 }
-            },
-            didDrawCell: function (data) {
-                // Add Note next to Client Name (Column Index 2)
-                if (data.section === 'body' && data.column.index === 2) {
-                    const entry = dayEntries[data.row.index];
-                    if (entry && entry.note) {
-                        const clientNameWidth = doc.getTextWidth(entry.client_name);
-                        const startX = data.cell.x + data.cell.padding('left') + clientNameWidth + 2; // 2mm padding
-
-                        doc.setFont("helvetica", "normal");
-                        doc.setTextColor(150, 150, 150);
-                        doc.setFontSize(9); // Match table font size
-
-                        // Align with the text baseline of the cell
-                        // @ts-ignore - textPos might be missing
-                        const textPos = (data.cell as any).textPos;
-                        const textY = textPos ? textPos.y : (data.cell.y + (data.cell.height / 2) + 1);
-
-                        doc.text(entry.note, startX, textY);
-                    }
-                }
             }
+            // [REMOVED] didDrawCell logic for Notes (now in content)
         });
 
         // @ts-ignore
         const finalY = doc.lastAutoTable.finalY;
         const totalMinutes = dayEntries.reduce((acc, curr) => {
             if (curr.type === 'break') return acc;
-            
+
             let dur = calculateDurationInMinutes(curr.start_time || '', curr.end_time || '', 0);
-            
-             // FIX: Use Target for Absences if 0
+
+            // FIX: Use Target for Absences if 0
             const paidAbsenceTypes = ['vacation', 'sick', 'holiday', 'special_holiday'];
             if (dur === 0 && paidAbsenceTypes.includes(curr.type || '')) {
                 const target = getDailyTargetForDate(curr.date, settings.target_hours);
@@ -859,7 +846,7 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
 
             tableBody.push([
                 item.start_time ? `${item.start_time}${item.end_time ? ' - ' + item.end_time : ''}` : '', // Time Range Column
-                label,
+                { content: label, order_number: item.order_number }, // Object for cell
                 { content: hoursStr, styles: { halign: 'right', textColor: isBreak ? [150, 150, 150] : [0, 0, 0] } },
                 item.note || ''
             ]);
@@ -879,6 +866,32 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
             2: { cellWidth: 20, halign: 'right' }, // Hours
             3: { cellWidth: 50, fontStyle: 'italic', textColor: [100, 100, 100] } // Note
         },
+        didParseCell: function (data) {
+            // Handle Object in Column 1 logic safely (default autoTable barely handles objects well without custom draw)
+            if (data.column.index === 1 && typeof data.cell.raw === 'object' && data.cell.raw !== null) {
+                data.cell.text = [(data.cell.raw as any).content]; // Set text for calculation
+            }
+        },
+        didDrawCell: function (data) {
+            // Add Order Number in Gray next to Project Name
+            if (data.section === 'body' && data.column.index === 1) {
+                const rawObj = data.cell.raw as any;
+                if (rawObj && rawObj.content && rawObj.order_number) {
+                    const textWidth = doc.getTextWidth(rawObj.content);
+                    const startX = data.cell.x + data.cell.padding('left') + textWidth + 2; // 2mm spacer
+
+                    doc.setFont("helvetica", "normal");
+                    doc.setTextColor(150, 150, 150); // Gray
+                    doc.setFontSize(10); // Match table font
+
+                    // Align
+                    const textPos = (data.cell as any).textPos;
+                    const textY = textPos ? textPos.y : (data.cell.y + (data.cell.height / 2) + 1.5);
+
+                    doc.text(`#${rawObj.order_number}`, startX, textY);
+                }
+            }
+        }
     });
 
     // @ts-ignore

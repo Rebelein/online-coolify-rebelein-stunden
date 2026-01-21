@@ -1689,7 +1689,12 @@ const OfficeUserPage: React.FC = () => {
                         <GlassCard className="w-full max-w-7xl max-h-[90vh] overflow-y-auto relative shadow-2xl border-white/20">
                             <button onClick={() => setSelectedDay(null)} className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"><X size={20} /></button>
                             <div className="mb-6">
-                                <h3 className="text-2xl font-bold text-white">{selectedDay.toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long' })}</h3>
+                                <h3 className="text-2xl font-bold text-white">
+                                    {selectedDay.toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long' })}
+                                    <span className="ml-3 text-lg font-normal text-white/50">
+                                        — {currentUser?.display_name || 'Benutzer'}
+                                    </span>
+                                </h3>
                                 <p className="text-white/40 text-sm">Tagesdetails bearbeiten</p>
                             </div>
 
