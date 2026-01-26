@@ -421,7 +421,9 @@ const EntryPage: React.FC = () => {
         }
         // --- PERSISTENCE LOGIC END ---
 
-        const isNextAbsence = ['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay'].includes(nextType);
+        // START CHANGE: Treat overtime_reduction as absence (0 hours, no times)
+        const isNextAbsence = ['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay', 'overtime_reduction'].includes(nextType);
+        // END CHANGE
 
         if (isNextAbsence) {
             setHours('0');
@@ -436,9 +438,11 @@ const EntryPage: React.FC = () => {
             }
 
             // Clear hours if coming from absence type (where we set it to '0')
-            if (['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay'].includes(entryType)) {
+            // START CHANGE: Include overtime_reduction here too to clear the '0'
+            if (['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay', 'overtime_reduction'].includes(entryType)) {
                 setHours('');
             }
+            // END CHANGE
         }
 
         if (nextType !== 'emergency_service') {
@@ -1811,7 +1815,7 @@ const EntryPage: React.FC = () => {
                                     value={projectStartTime}
                                     onChange={(e) => handleStartTimeChange(e.target.value)}
                                     onBlur={handleStartTimeBlur}
-                                    disabled={['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay'].includes(entryType)}
+                                    disabled={['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay', 'overtime_reduction'].includes(entryType)}
                                     className="text-center font-mono"
                                 />
                             </div>
@@ -1824,7 +1828,7 @@ const EntryPage: React.FC = () => {
                                     value={projectEndTime}
                                     onChange={(e) => handleEndTimeChange(e.target.value)}
                                     onBlur={handleEndTimeBlur}
-                                    disabled={['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay'].includes(entryType)}
+                                    disabled={['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay', 'overtime_reduction'].includes(entryType)}
                                     className="text-center font-mono"
                                 />
                             </div>
@@ -1857,8 +1861,8 @@ const EntryPage: React.FC = () => {
                                 placeholder="0.00"
                                 value={hours}
                                 onChange={(e) => handleHoursChange(e.target.value)}
-                                required={!['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay'].includes(entryType)}
-                                disabled={['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay'].includes(entryType)}
+                                required={!['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay', 'overtime_reduction'].includes(entryType)}
+                                disabled={['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay', 'overtime_reduction'].includes(entryType)}
                                 className="text-3xl font-mono pl-4 h-16 tracking-widest disabled:opacity-30"
                             />
                             <span className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 text-sm font-medium">Std</span>

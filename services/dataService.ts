@@ -158,6 +158,7 @@ export const useTimeEntries = (customUserId?: string) => {
     let query = supabase
       .from('time_entries')
       .select('*')
+      // .eq('is_deleted', false) // reverted: fetch deletions to show them in history
       .order('date', { ascending: false })
       .order('start_time', { ascending: true });
 
@@ -181,6 +182,9 @@ export const useTimeEntries = (customUserId?: string) => {
       console.error('Error fetching entries:', error.message || JSON.stringify(error));
     } else if (data) {
       let fetchedEntries = data as TimeEntry[];
+
+      // Client-side safety filter REVERTED: We want to see deleted entries now.
+      // fetchedEntries = fetchedEntries.filter(e => e.is_deleted !== true);
 
       // Fetch history existence
       if (fetchedEntries.length > 0) {

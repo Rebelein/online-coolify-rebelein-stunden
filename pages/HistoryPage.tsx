@@ -16,8 +16,7 @@ const HistoryPage: React.FC = () => {
     const [viewDate, setViewDate] = useState(new Date());
     const [viewMode, setViewMode] = useState<'projects' | 'attendance'>('projects');
 
-    const [touchStart, setTouchStart] = useState<number | null>(null);
-    const [touchEnd, setTouchEnd] = useState<number | null>(null);
+
 
     const [showPdfModal, setShowPdfModal] = useState(false);
     // Nutzung von getLocalISOString für korrekte Vorbelegung
@@ -92,20 +91,7 @@ const HistoryPage: React.FC = () => {
         setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
     };
 
-    const minSwipeDistance = 50;
-    const onTouchStart = (e: React.TouchEvent) => {
-        setTouchEnd(null);
-        setTouchStart(e.targetTouches[0].clientX);
-    };
-    const onTouchMove = (e: React.TouchEvent) => {
-        setTouchEnd(e.targetTouches[0].clientX);
-    };
-    const onTouchEnd = () => {
-        if (!touchStart || !touchEnd) return;
-        const distance = touchStart - touchEnd;
-        if (distance > minSwipeDistance) nextMonth();
-        else if (distance < -minSwipeDistance) prevMonth();
-    };
+
 
     // --- Data Filtering ---
     const currentMonthData = useMemo(() => {
@@ -257,11 +243,7 @@ const HistoryPage: React.FC = () => {
         if (viewMode === 'projects') {
             return currentMonthData.reduce((acc, [_, dayEntries]) => {
                 return acc + dayEntries.reduce((sum, e) => {
-                    if (e.type === 'break' || e.type === 'overtime_reduction') return sum;
-                    let hours = e.hours;
-                    if (e.type === 'emergency_service' && e.surcharge) {
-                        hours = hours * (1 + e.surcharge / 100);
-                    }
+                    const hours = e.is_deleted ? 0 : (e.type === 'emergency_service' && e.surcharge ? e.hours * (1 + e.surcharge / 100) : (e.type === 'break' || e.type === 'overtime_reduction' ? 0 : e.hours));
                     return sum + hours;
                 }, 0);
             }, 0);
@@ -369,6 +351,8 @@ const HistoryPage: React.FC = () => {
     };
 
     const getEntryStyle = (entry: TimeEntry) => {
+        if (entry.is_deleted) return 'border-red-500/20 bg-red-900/5 text-red-200/50 italic opacity-60 line-through decoration-red-500/30';
+
         if (entry.isAbsence) {
             switch (entry.type) {
                 case 'vacation': return `border-purple-500/20 bg-purple-900/10 text-purple-200 ${entry.submitted ? 'ring-1 ring-emerald-500/50' : ''}`;
@@ -593,7 +577,7 @@ const HistoryPage: React.FC = () => {
                 </GlassCard>
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-6 pr-1 -mr-2 pb-12 md:pr-4" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+            <div className="flex-1 overflow-y-auto space-y-6 pr-1 -mr-2 pb-12 md:pr-4">
                 {/* PROJECTS VIEW */}
                 {viewMode === 'projects' && (
                     <>
@@ -608,6 +592,8 @@ const HistoryPage: React.FC = () => {
                             const dateObj = new Date(dateStr);
                             const isLocked = lockedDays.includes(dateStr);
                             const dayTotal = dayEntries.reduce((sum, e) => {
+                                const isDeleted = e.is_deleted === true;
+                                if (isDeleted) return sum; // Filter out deleted entries from total
                                 if (e.type === 'break' || e.type === 'overtime_reduction') return sum;
                                 let hours = e.hours;
                                 if (e.type === 'emergency_service' && e.surcharge) {
@@ -666,6 +652,9 @@ const HistoryPage: React.FC = () => {
                                                         <div className="flex gap-2 justify-end mt-1">
                                                             <button onClick={() => setEditingEntry(null)} className="p-1.5 bg-white/10 rounded text-white"><X size={16} /></button>
                                                             <button onClick={handleSaveEdit} className="p-1.5 bg-teal-500 rounded text-white"><Save size={16} /></button>
+                                                            <button onClick={() => handleDeleteClick(entry)} className="p-1.5 hover:bg-white/10 rounded text-red-400 hover:text-red-300 transition-colors" title="Löschen">
+                                                                <Trash2 size={14} />
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 ) : (
@@ -718,7 +707,7 @@ const HistoryPage: React.FC = () => {
                                                         )}
 
                                                         {/* Modification: Show Pending/Confirmed status for ALL types if relevant (e.g. late entry) or if it's a specific type requiring confirmation */}
-                                                        {(['company', 'office', 'warehouse', 'car'].includes(entry.type || '') || entry.late_reason || entry.responsible_user_id) && (
+                                                        {((['company', 'office', 'warehouse', 'car'].includes(entry.type || '') || entry.late_reason || entry.responsible_user_id) && !entry.is_deleted) && (
                                                             <div className="mt-2 text-[10px] flex items-center gap-1 border-t border-white/5 pt-1">
                                                                 {entry.confirmed_at ? (
                                                                     <span className="text-emerald-400 flex items-center gap-1"><CheckCircle size={10} /> Bestätigt</span>
@@ -739,7 +728,7 @@ const HistoryPage: React.FC = () => {
                                                                     </span>
                                                                 ) : (
                                                                     <span className="text-xs text-white/40 flex items-center gap-1 md:text-sm">
-                                                                        <Clock size={10} className="md:w-4 md:h-4" /> 
+                                                                        <Clock size={10} className="md:w-4 md:h-4" />
                                                                         {entry.type === 'emergency_service' && entry.surcharge ? (
                                                                             <span title={`Basis: ${entry.hours.toFixed(2)}h + ${entry.surcharge}% Zuschlag`}>
                                                                                 {(entry.hours * (1 + entry.surcharge / 100)).toFixed(2)} h <span className="text-[10px] opacity-70">(+{entry.surcharge}%)</span>
@@ -751,7 +740,7 @@ const HistoryPage: React.FC = () => {
                                                                 )}
                                                             </div>
 
-                                                            {!isLocked && (!entry.submitted || entry.rejected_at) && settings?.is_active !== false && (
+                                                            {!isLocked && (!entry.submitted || entry.rejected_at) && settings?.is_active !== false && !entry.is_deleted && (
                                                                 <div className="flex items-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                                                     {!entry.isAbsence && (
                                                                         <button onClick={() => handleEditClick(entry)} className={`p-1.5 rounded-lg transition-colors ${entry.rejected_at ? 'text-teal-300 bg-teal-500/10 hover:bg-teal-500/20' : 'text-white/30 hover:text-white hover:bg-white/10'}`}>
@@ -776,6 +765,11 @@ const HistoryPage: React.FC = () => {
                                                                     >
                                                                         <Trash2 size={14} />
                                                                     </button>
+                                                                </div>
+                                                            )}
+                                                            {entry.is_deleted && (
+                                                                <div className="text-[10px] text-red-400/50 font-bold uppercase tracking-widest border border-red-500/20 px-2 py-0.5 rounded select-none">
+                                                                    Gelöscht
                                                                 </div>
                                                             )}
                                                             {entry.submitted && <span className="text-emerald-500/50 p-1"><CheckCircle size={14} /></span>}

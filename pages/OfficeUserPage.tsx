@@ -21,6 +21,7 @@ import { formatDuration } from '../services/utils/timeUtils';
 import logoRebelein from '../logo/Logo Rebelein.jpeg';
 
 const OfficeUserPage: React.FC = () => {
+    // Debug: OfficeUserPage loaded
     const { userId } = useParams();
     const navigate = useNavigate();
     const { fetchAllUsers, users, updateOfficeUserSettings, checkAndApplyVacationCarryover, fetchYearlyQuota, updateYearlyQuota, fetchVacationAuditLog, fetchQuotaNotifications } = useOfficeService();
@@ -201,6 +202,8 @@ const OfficeUserPage: React.FC = () => {
         if (!analysisStart || !analysisEnd) return [];
         return entries.filter(e => {
             if (!e.date) return false;
+            // Exclude deleted entries from analysis
+            if (e.is_deleted || e.deleted_at) return false;
             return e.date >= analysisStart &&
                 e.date <= analysisEnd &&
                 activeFilters.includes(e.type || 'work');
@@ -209,7 +212,7 @@ const OfficeUserPage: React.FC = () => {
 
     const pendingEntries = useMemo(() => {
         const types = ['company', 'office', 'warehouse', 'car', 'overtime_reduction'];
-        return monthEntries.filter(e => types.includes(e.type || '') && !e.confirmed_at);
+        return monthEntries.filter(e => types.includes(e.type || '') && !e.confirmed_at && !e.is_deleted && !e.deleted_at);
     }, [monthEntries]);
 
     const pendingRequests = useMemo(() => requests.filter(r => r.status === 'pending'), [requests]);
@@ -232,7 +235,8 @@ const OfficeUserPage: React.FC = () => {
         if (startStr > todayStr) return { target: 0, actual: 0, diff: 0, startStr };
 
         // CUTOFF: Submitted regular entries only (ignore overtime_reduction for cutoff to not extend range artificially)
-        const relevantEntries = entries.filter(e => e.submitted && e.date <= todayStr);
+        // Also exclude DELETED entries from defining the range
+        const relevantEntries = entries.filter(e => e.submitted && e.date <= todayStr && !e.is_deleted && !e.deleted_at);
         const lastRelevantEntry = relevantEntries.sort((a, b) => b.date.localeCompare(a.date))[0];
 
         if (!lastRelevantEntry) {
@@ -287,7 +291,8 @@ const OfficeUserPage: React.FC = () => {
                 // EXCLUDE overtime_reduction from "Actuals" so it reduces the balance
                 return e.date >= startStr &&
                     e.date <= cutoffDateStr &&
-                    !['break', 'vacation', 'sick', 'holiday', 'unpaid', 'overtime_reduction'].includes(e.type || '');
+                    !['break', 'vacation', 'sick', 'holiday', 'unpaid', 'overtime_reduction'].includes(e.type || '') &&
+                    !e.is_deleted && !e.deleted_at;
             })
             .reduce((sum, e) => sum + e.hours, 0);
 
@@ -297,6 +302,7 @@ const OfficeUserPage: React.FC = () => {
             .filter(e => {
                 return e.type === 'overtime_reduction' &&
                     e.confirmed_at && // Must be confirmed by office
+                    !e.is_deleted && !e.deleted_at &&
                     e.date > cutoffDateStr; // Only count those strictly AFTER the normal calculation period
             })
             .reduce((sum, e) => sum + e.hours, 0);
@@ -354,8 +360,8 @@ const OfficeUserPage: React.FC = () => {
                 let duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
                 if (duration < 0) duration += 24; // Handle over midnight if needed (though unlikely for daily log structure)
 
-                // Subtract breaks for this day
-                const dayBreaks = entries.filter(e => e.date === log.date && e.type === 'break')
+                // Subtract breaks for this day (exclude deleted breaks)
+                const dayBreaks = entries.filter(e => e.date === log.date && e.type === 'break' && !e.is_deleted && !e.deleted_at)
                     .reduce((sum, b) => sum + b.hours, 0);
 
                 total += Math.max(0, duration - dayBreaks);
@@ -411,7 +417,8 @@ const OfficeUserPage: React.FC = () => {
             .filter(e => {
                 const [y, m] = e.date.split('-').map(Number);
                 return y === year && m === month + 1 &&
-                    !['break', 'vacation', 'sick', 'holiday', 'unpaid', 'overtime_reduction'].includes(e.type || '');
+                    !['break', 'vacation', 'sick', 'holiday', 'unpaid', 'overtime_reduction'].includes(e.type || '') &&
+                    !e.is_deleted && !e.deleted_at;
             })
             .reduce((sum, e) => sum + e.hours, 0);
 
@@ -844,6 +851,9 @@ const OfficeUserPage: React.FC = () => {
             // await fetchUserEntries(userId, selectedMonth); // Not exposed, relies on subscription
 
             // Add history record for the request
+            // Add history record for the request
+            // RPC function 'log_entry_change' is missing in DB, disabled for now.
+            /* 
             await supabase.rpc('log_entry_change', {
                 p_entry_id: entryId,
                 p_changed_by: user.id,
@@ -852,6 +862,7 @@ const OfficeUserPage: React.FC = () => {
                 p_new_values: { reason: reason },
                 p_change_reason: reason
             });
+            */
         }
     };
 
@@ -873,8 +884,8 @@ const OfficeUserPage: React.FC = () => {
         const start = new Date(`2000-01-01T${dailyLog.start_time}`);
         const end = new Date(`2000-01-01T${dailyLog.end_time}`);
         let diff = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-        // Breaks
-        const breaks = modalEntries.filter(e => e.type === 'break').reduce((s, b) => s + b.hours, 0);
+        // Breaks (exclude deleted)
+        const breaks = modalEntries.filter(e => e.type === 'break' && !e.is_deleted && !e.deleted_at).reduce((s, b) => s + b.hours, 0);
         const netto = Math.max(0, diff - breaks);
 
         return {
@@ -1623,8 +1634,8 @@ const OfficeUserPage: React.FC = () => {
                     const target = getDailyTargetForDate(dateStr, currentUser?.target_hours || {});
                     const absence = absences.find(a => dateStr >= a.start_date && dateStr <= a.end_date);
 
-                    // Calculate hours (Ist)
-                    const dayEntries = monthEntries.filter(e => e.date === dateStr);
+                    // Calculate hours (Ist) - EXCLUDE DELETED
+                    const dayEntries = monthEntries.filter(e => e.date === dateStr && !e.is_deleted && !e.deleted_at);
                     let hours = 0;
                     if (dayEntries.length > 0) {
                         hours = dayEntries.reduce((acc, e) => e.type === 'break' ? acc : acc + e.hours, 0);
@@ -1801,237 +1812,244 @@ const OfficeUserPage: React.FC = () => {
                                         <p className="text-white/30 text-sm italic">Keine Einträge für diesen Tag.</p>
                                     </div>
                                 )}
-                                {modalEntries.map(entry => (
-                                    <div key={entry.id} className={`group relative p-4 rounded-xl border transition-all ${entry.type === 'emergency_service' ? 'bg-rose-500/10 border-rose-500/50 shadow-[0_0_15px_rgba(244,63,94,0.15)]' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
-                                        {editingEntry?.id === entry.id ? (
-                                            <div className="space-y-4 animate-in fade-in duration-200">
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                    <div>
-                                                        <label className="text-[10px] text-white/40 uppercase font-bold mb-1 block">Kunde / Projekt</label>
-                                                        <GlassInput type="text" value={editForm.client_name} onChange={e => setEditForm({ ...editForm, client_name: e.target.value })} className="!py-2 !text-sm" />
-                                                    </div>
-                                                    <div className="grid grid-cols-2 gap-2">
+                                {modalEntries.map(entry => {
+                                    const isDeleted = entry.is_deleted || entry.deleted_at;
+                                    return (
+                                        <div key={entry.id} className={`group relative p-4 rounded-xl border transition-all ${entry.type === 'emergency_service' ? 'bg-rose-500/10 border-rose-500/50 shadow-[0_0_15px_rgba(244,63,94,0.15)]' : 'bg-white/5 border-white/10 hover:bg-white/10'} ${isDeleted ? 'opacity-50 grayscale border-dashed !bg-black/40' : ''}`}>
+                                            {editingEntry?.id === entry.id ? (
+                                                <div className="space-y-4 animate-in fade-in duration-200">
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                         <div>
-                                                            <label className="text-[10px] text-white/40 uppercase font-bold mb-1 block">Start</label>
-                                                            <GlassInput type="time" value={editForm.start_time} onChange={e => setEditForm({ ...editForm, start_time: e.target.value })} className="!py-2 !text-sm text-center" />
+                                                            <label className="text-[10px] text-white/40 uppercase font-bold mb-1 block">Kunde / Projekt</label>
+                                                            <GlassInput type="text" value={editForm.client_name} onChange={e => setEditForm({ ...editForm, client_name: e.target.value })} className="!py-2 !text-sm" />
                                                         </div>
-                                                        <div>
-                                                            <label className="text-[10px] text-white/40 uppercase font-bold mb-1 block">Ende</label>
-                                                            <GlassInput type="time" value={editForm.end_time} onChange={e => setEditForm({ ...editForm, end_time: e.target.value })} className="!py-2 !text-sm text-center" />
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                    <div>
-                                                        <label className="text-[10px] text-white/40 uppercase font-bold mb-1 block">Stunden (Dezimal)</label>
-                                                        <GlassInput type="number" value={editForm.hours} onChange={e => setEditForm({ ...editForm, hours: e.target.value })} className="!py-2 !text-sm" />
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-[10px] text-orange-400 uppercase font-bold mb-1 block">Änderungsgrund (Pflicht)</label>
-                                                        <GlassInput type="text" value={editForm.reason} onChange={e => setEditForm({ ...editForm, reason: e.target.value })} className="!py-2 !text-sm border-orange-500/30 bg-orange-500/10 placeholder-orange-300/30" placeholder="Warum wird geändert?" />
-                                                    </div>
-                                                </div>
-                                                <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
-                                                    <button onClick={() => setEditingEntry(null)} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-colors">Abbrechen</button>
-                                                    <button onClick={handleSaveEntryEdit} className="px-3 py-2 rounded-lg bg-teal-500 hover:bg-teal-600 text-white text-xs font-bold transition-colors flex items-center gap-2"><Save size={14} /> Speichern</button>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <div className="flex flex-col">
-                                                <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
-                                                    {/* TIME & DURATION */}
-                                                    <div className="flex flex-row md:flex-col items-center md:items-start gap-3 md:gap-1 min-w-[100px] border-b md:border-b-0 md:border-r border-white/10 pb-2 md:pb-0 md:pr-4 w-full md:w-auto">
-                                                        <div className="text-white font-mono font-bold text-lg leading-none">
-                                                            {entry.hours.toFixed(2)}<span className="text-xs text-white/40 font-sans ml-1">h</span>
-                                                        </div>
-                                                        <div className="text-xs text-white/40 font-mono flex items-center gap-1">
-                                                            <Clock size={10} />
-                                                            {entry.start_time && entry.end_time ? `${entry.start_time} - ${entry.end_time}` : 'Manuell'}
-                                                        </div>
-                                                    </div>
-
-                                                    {/* MAIN CONTENT */}
-                                                    <div className="flex-1 min-w-0 w-full">
-                                                        <div className="flex flex-wrap items-center gap-2 mb-1">
-                                                            <span className="font-bold text-white text-base truncate" title={entry.client_name}>
-                                                                {entry.client_name}
-                                                            </span>
-                                                            {entry.order_number && (
-                                                                <span
-                                                                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(entry.order_number || ''); }}
-                                                                    className="inline-flex items-center gap-1 bg-teal-500/10 border border-teal-500/20 px-1.5 py-0.5 rounded text-[10px] text-teal-300 font-mono cursor-pointer hover:bg-teal-500/20 active:scale-95 transition-all"
-                                                                    title="Klicken zum Kopieren"
-                                                                >
-                                                                    {entry.order_number}
-                                                                </span>
-                                                            )}
-                                                        </div>
-
-                                                        {/* TAGS ROW */}
-                                                        <div className="flex flex-wrap items-center gap-2 mb-2">
-                                                            <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase font-bold flex items-center gap-1
-                                                            ${entry.type === 'break' ? 'border-orange-500/30 text-orange-300 bg-orange-500/10' :
-                                                                    entry.type === 'overtime_reduction' ? 'border-pink-500/30 text-pink-300 bg-pink-500/10' :
-                                                                        entry.type === 'emergency_service' ? 'border-rose-500/30 text-rose-300 bg-rose-500/10' :
-                                                                            'border-teal-500/30 text-teal-300 bg-teal-500/10'}`}>
-                                                                {entry.type === 'break' ? <Coffee size={10} /> :
-                                                                    entry.type === 'overtime_reduction' ? <TrendingDown size={10} /> :
-                                                                        entry.type === 'emergency_service' ? <Siren size={10} /> :
-                                                                            <Briefcase size={10} />}
-                                                                {entry.type === 'overtime_reduction' ? 'Abbau' :
-                                                                    entry.type === 'emergency_service' ? 'Notdienst' :
-                                                                        entry.type === 'break' ? 'Pause' : 'Arbeit'}
-                                                            </span>
-
-                                                            {entry.type === 'emergency_service' && entry.surcharge && entry.surcharge > 0 && (
-                                                                <span className="text-[10px] font-bold text-rose-300 bg-rose-500/20 px-1.5 py-0.5 rounded border border-rose-500/30">
-                                                                    +{entry.surcharge}% Zuschlag
-                                                                </span>
-                                                            )}
-
-                                                            {entry.late_reason && (
-                                                                <span className="text-[10px] font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/30 flex items-center gap-1" title={entry.late_reason}>
-                                                                    <AlertTriangle size={10} /> Verspätet
-                                                                </span>
-                                                            )}
-
-                                                            {entry.confirmed_at ? (
-                                                                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1">
-                                                                    <CheckCircle size={10} /> Bestätigt von {users.find(u => u.user_id === entry.confirmed_by)?.display_name || 'Admin'}
-                                                                </span>
-                                                            ) : entry.rejected_at ? (
-                                                                <span className="text-[10px] font-bold text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20 flex items-center gap-1">
-                                                                    <XCircle size={10} /> Abgelehnt
-                                                                </span>
-                                                            ) : (
-                                                                <span className="text-[10px] font-bold text-white/30 bg-white/5 px-1.5 py-0.5 rounded border border-white/10 flex items-center gap-1">
-                                                                    <Clock size={10} /> Offen
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </div>
-
-                                                    {/* ACTIONS */}
-                                                    <div className="flex items-center gap-2 pl-4 border-l border-white/10 md:self-stretch">
-                                                        {/* CONFIRMATION BUTTONS */}
-                                                        {!entry.confirmed_at && !entry.rejected_at && (
-                                                            <div className="flex items-center gap-1">
-                                                                {/* Confirmation logic block */}
-                                                                {(() => {
-                                                                    if (!canManage) return false;
-                                                                    if (entry.responsible_user_id && viewerSettings?.user_id !== entry.responsible_user_id) return false;
-                                                                    if (entry.late_reason && !entry.responsible_user_id && viewerSettings?.role !== 'admin') return false;
-
-                                                                    // 3. Limit to specific types (Company, Office, etc.) like in Dashboard
-                                                                    const confirmationTypes = ['company', 'office', 'warehouse', 'car', 'overtime_reduction'];
-                                                                    if (confirmationTypes.includes(entry.type || '')) return true;
-
-                                                                    return false;
-                                                                })() && (
-                                                                        <>
-                                                                            <button
-                                                                                onClick={() => confirmEntry(entry.id)}
-                                                                                title="Bestätigen"
-                                                                                className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-teal-400 bg-teal-500/10 border border-teal-500/30 hover:bg-teal-500/30 hover:text-teal-200"
-                                                                            >
-                                                                                <CheckCircle size={14} />
-                                                                            </button>
-                                                                            <button
-                                                                                onClick={() => setRejectionModal({ isOpen: true, entryId: entry.id, reason: '' })}
-                                                                                title="Ablehnen"
-                                                                                className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-red-400 bg-red-500/10 border border-red-500/30 hover:bg-red-500/30 hover:text-red-200"
-                                                                            >
-                                                                                <XCircle size={14} />
-                                                                            </button>
-                                                                        </>
-                                                                    )}
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                            <div>
+                                                                <label className="text-[10px] text-white/40 uppercase font-bold mb-1 block">Start</label>
+                                                                <GlassInput type="time" value={editForm.start_time} onChange={e => setEditForm({ ...editForm, start_time: e.target.value })} className="!py-2 !text-sm text-center" />
                                                             </div>
-                                                        )}
+                                                            <div>
+                                                                <label className="text-[10px] text-white/40 uppercase font-bold mb-1 block">Ende</label>
+                                                                <GlassInput type="time" value={editForm.end_time} onChange={e => setEditForm({ ...editForm, end_time: e.target.value })} className="!py-2 !text-sm text-center" />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        <div>
+                                                            <label className="text-[10px] text-white/40 uppercase font-bold mb-1 block">Stunden (Dezimal)</label>
+                                                            <GlassInput type="number" value={editForm.hours} onChange={e => setEditForm({ ...editForm, hours: e.target.value })} className="!py-2 !text-sm" />
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-[10px] text-orange-400 uppercase font-bold mb-1 block">Änderungsgrund (Pflicht)</label>
+                                                            <GlassInput type="text" value={editForm.reason} onChange={e => setEditForm({ ...editForm, reason: e.target.value })} className="!py-2 !text-sm border-orange-500/30 bg-orange-500/10 placeholder-orange-300/30" placeholder="Warum wird geändert?" />
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                                                        <button onClick={() => setEditingEntry(null)} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-colors">Abbrechen</button>
+                                                        <button onClick={handleSaveEntryEdit} className="px-3 py-2 rounded-lg bg-teal-500 hover:bg-teal-600 text-white text-xs font-bold transition-colors flex items-center gap-2"><Save size={14} /> Speichern</button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="flex flex-col">
+                                                    <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
+                                                        {/* TIME & DURATION */}
+                                                        <div className="flex flex-row md:flex-col items-center md:items-start gap-3 md:gap-1 min-w-[100px] border-b md:border-b-0 md:border-r border-white/10 pb-2 md:pb-0 md:pr-4 w-full md:w-auto">
+                                                            <div className="text-white font-mono font-bold text-lg leading-none">
+                                                                {entry.hours.toFixed(2)}<span className="text-xs text-white/40 font-sans ml-1">h</span>
+                                                            </div>
+                                                            <div className="text-xs text-white/40 font-mono flex items-center gap-1">
+                                                                <Clock size={10} />
+                                                                {entry.start_time && entry.end_time ? `${entry.start_time} - ${entry.end_time}` : 'Manuell'}
+                                                            </div>
+                                                        </div>
 
-                                                        {/* HISTORY BUTTON */}
-                                                        <button
-                                                            onClick={() => {
-                                                                setHistoryModal({ isOpen: true, entryId: entry.id });
-                                                                fetchEntryHistory(entry.id);
-                                                            }}
-                                                            title="Verlauf anzeigen"
-                                                            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors border ${entry.has_history
-                                                                ? 'text-purple-300 bg-purple-500/10 border-purple-500/30 hover:bg-purple-500/20'
-                                                                : 'text-white/30 bg-white/5 border-white/10 hover:bg-white/10 hover:text-white'}`}
-                                                        >
-                                                            <HistoryIcon size={14} />
-                                                        </button>
-
-                                                        {/* EDIT / DELETE (Only if allowed) */}
-                                                        {canManage && (
-                                                            <div className="flex items-center gap-2 ml-2 pl-2 border-l border-white/10">
-                                                                <button
-                                                                    onClick={() => { setEditingEntry(entry); setEditForm({ ...editForm, client_name: entry.client_name, hours: entry.hours.toString().replace('.', ','), start_time: entry.start_time || '', end_time: entry.end_time || '', note: entry.note || '', reason: '' }) }}
-                                                                    title="Bearbeiten"
-                                                                    className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-white/50 bg-white/5 border border-white/10 hover:bg-white/10 hover:text-white"
-                                                                >
-                                                                    <Edit2 size={14} />
-                                                                </button>
-
-                                                                {entry.deletion_requested_at ? (
-                                                                    <>
-                                                                        <button
-                                                                            onClick={() => setRejectionModal({ isOpen: true, entryId: entry.id, reason: '' })}
-                                                                            className="w-8 h-8 rounded-lg flex items-center justify-center bg-orange-500/20 text-orange-400 border border-orange-500/50 hover:bg-orange-500/30"
-                                                                        >
-                                                                            <XCircle size={14} />
-                                                                        </button>
-                                                                        <button
-                                                                            onClick={() => deleteEntry(entry.id, entry.deletion_request_reason || 'Löschantrag genehmigt')}
-                                                                            className="w-8 h-8 rounded-lg flex items-center justify-center bg-red-500 text-white border border-red-600 shadow-lg shadow-red-900/20 hover:bg-red-600"
-                                                                        >
-                                                                            <Trash2 size={14} />
-                                                                        </button>
-                                                                    </>
-                                                                ) : (
-                                                                    <button
-                                                                        onClick={() => handleDeleteEntryWithReason(entry.id)}
-                                                                        title="Löschen"
-                                                                        className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-red-400/50 bg-red-500/5 border-red-500/10 hover:bg-red-500/20 hover:text-red-300"
+                                                        {/* MAIN CONTENT */}
+                                                        <div className="flex-1 min-w-0 w-full">
+                                                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                                                                <span className="font-bold text-white text-base truncate" title={entry.client_name}>
+                                                                    {entry.client_name}
+                                                                </span>
+                                                                {entry.order_number && (
+                                                                    <span
+                                                                        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(entry.order_number || ''); }}
+                                                                        className="inline-flex items-center gap-1 bg-teal-500/10 border border-teal-500/20 px-1.5 py-0.5 rounded text-[10px] text-teal-300 font-mono cursor-pointer hover:bg-teal-500/20 active:scale-95 transition-all"
+                                                                        title="Klicken zum Kopieren"
                                                                     >
-                                                                        <Trash2 size={14} />
-                                                                    </button>
+                                                                        {entry.order_number}
+                                                                    </span>
                                                                 )}
                                                             </div>
-                                                        )}
-                                                    </div>
-                                                </div>
 
-                                                {entry.note && (
-                                                    <div className="mt-3 pt-3 border-t border-white/5 w-full flex items-start gap-1.5 text-white/50 text-xs italic">
-                                                        <StickyNote size={12} className="mt-0.5 shrink-0" />
-                                                        <span>{entry.note}</span>
-                                                    </div>
-                                                )}
+                                                            {/* TAGS ROW */}
+                                                            <div className="flex flex-wrap items-center gap-2 mb-2">
+                                                                <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase font-bold flex items-center gap-1
+                                                            ${entry.type === 'break' ? 'border-orange-500/30 text-orange-300 bg-orange-500/10' :
+                                                                        entry.type === 'overtime_reduction' ? 'border-pink-500/30 text-pink-300 bg-pink-500/10' :
+                                                                            entry.type === 'emergency_service' ? 'border-rose-500/30 text-rose-300 bg-rose-500/10' :
+                                                                                'border-teal-500/30 text-teal-300 bg-teal-500/10'}`}>
+                                                                    {entry.type === 'break' ? <Coffee size={10} /> :
+                                                                        entry.type === 'overtime_reduction' ? <TrendingDown size={10} /> :
+                                                                            entry.type === 'emergency_service' ? <Siren size={10} /> :
+                                                                                <Briefcase size={10} />}
+                                                                    {entry.type === 'overtime_reduction' ? 'Abbau' :
+                                                                        entry.type === 'emergency_service' ? 'Notdienst' :
+                                                                            entry.type === 'break' ? 'Pause' : 'Arbeit'}
+                                                                </span>
 
-                                                {/* LATE REASON BLOCK */}
-                                                {entry.late_reason && (
-                                                    <div className="mt-2 pt-2 border-t border-amber-500/20 w-full">
-                                                        <div className="flex items-center gap-2 text-amber-300 bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
-                                                            <AlertTriangle size={14} className="shrink-0" />
-                                                            <div className="flex flex-col">
-                                                                <span className="text-xs font-bold uppercase tracking-wider text-amber-400">Verspätungsgrund</span>
-                                                                <span className="text-sm italic text-amber-200">"{entry.late_reason}"</span>
-                                                                {/* Confirmed by for Late Reason (usually same as entry confirmation) */}
-                                                                {entry.confirmed_at && (
-                                                                    <span className="text-[10px] text-amber-400/60 mt-1 flex items-center gap-1">
-                                                                        <CheckCircle size={10} />
-                                                                        Bestätigt von {users.find(u => u.user_id === entry.confirmed_by)?.display_name || 'Admin'}
+                                                                {entry.type === 'emergency_service' && entry.surcharge && entry.surcharge > 0 && (
+                                                                    <span className="text-[10px] font-bold text-rose-300 bg-rose-500/20 px-1.5 py-0.5 rounded border border-rose-500/30">
+                                                                        +{entry.surcharge}% Zuschlag
+                                                                    </span>
+                                                                )}
+
+                                                                {entry.late_reason && (
+                                                                    <span className="text-[10px] font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/30 flex items-center gap-1" title={entry.late_reason}>
+                                                                        <AlertTriangle size={10} /> Verspätet
+                                                                    </span>
+                                                                )}
+
+                                                                {entry.confirmed_at ? (
+                                                                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1">
+                                                                        <CheckCircle size={10} /> Bestätigt von {users.find(u => u.user_id === entry.confirmed_by)?.display_name || 'Admin'}
+                                                                    </span>
+                                                                ) : isDeleted ? (
+                                                                    <span className="text-[10px] font-bold text-white bg-red-500/20 px-1.5 py-0.5 rounded border border-red-500/30 flex items-center gap-1">
+                                                                        <Trash2 size={10} /> GELÖSCHT
+                                                                    </span>
+                                                                ) : entry.rejected_at ? (
+                                                                    <span className="text-[10px] font-bold text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20 flex items-center gap-1">
+                                                                        <XCircle size={10} /> Abgelehnt
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-[10px] font-bold text-white/30 bg-white/5 px-1.5 py-0.5 rounded border border-white/10 flex items-center gap-1">
+                                                                        <Clock size={10} /> Offen
                                                                     </span>
                                                                 )}
                                                             </div>
                                                         </div>
+
+                                                        {/* ACTIONS */}
+                                                        <div className="flex items-center gap-2 pl-4 border-l border-white/10 md:self-stretch">
+                                                            {/* CONFIRMATION BUTTONS */}
+                                                            {!entry.confirmed_at && !entry.rejected_at && !isDeleted && (
+                                                                <div className="flex items-center gap-1">
+                                                                    {/* Confirmation logic block */}
+                                                                    {(() => {
+                                                                        if (!canManage) return false;
+                                                                        if (entry.responsible_user_id && viewerSettings?.user_id !== entry.responsible_user_id) return false;
+                                                                        if (entry.late_reason && !entry.responsible_user_id && viewerSettings?.role !== 'admin') return false;
+
+                                                                        // 3. Limit to specific types (Company, Office, etc.) like in Dashboard
+                                                                        const confirmationTypes = ['company', 'office', 'warehouse', 'car', 'overtime_reduction'];
+                                                                        if (confirmationTypes.includes(entry.type || '')) return true;
+
+                                                                        return false;
+                                                                    })() && (
+                                                                            <>
+                                                                                <button
+                                                                                    onClick={() => confirmEntry(entry.id)}
+                                                                                    title="Bestätigen"
+                                                                                    className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-teal-400 bg-teal-500/10 border border-teal-500/30 hover:bg-teal-500/30 hover:text-teal-200"
+                                                                                >
+                                                                                    <CheckCircle size={14} />
+                                                                                </button>
+                                                                                <button
+                                                                                    onClick={() => setRejectionModal({ isOpen: true, entryId: entry.id, reason: '' })}
+                                                                                    title="Ablehnen"
+                                                                                    className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-red-400 bg-red-500/10 border border-red-500/30 hover:bg-red-500/30 hover:text-red-200"
+                                                                                >
+                                                                                    <XCircle size={14} />
+                                                                                </button>
+                                                                            </>
+                                                                        )}
+                                                                </div>
+                                                            )}
+
+                                                            {/* HISTORY BUTTON */}
+                                                            <button
+                                                                onClick={() => {
+                                                                    setHistoryModal({ isOpen: true, entryId: entry.id });
+                                                                    fetchEntryHistory(entry.id);
+                                                                }}
+                                                                title="Verlauf anzeigen"
+                                                                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors border ${entry.has_history
+                                                                    ? 'text-purple-300 bg-purple-500/10 border-purple-500/30 hover:bg-purple-500/20'
+                                                                    : 'text-white/30 bg-white/5 border-white/10 hover:bg-white/10 hover:text-white'}`}
+                                                            >
+                                                                <HistoryIcon size={14} />
+                                                            </button>
+
+                                                            {/* EDIT / DELETE (Only if allowed) */}
+                                                            {canManage && !isDeleted && (
+                                                                <div className="flex items-center gap-2 ml-2 pl-2 border-l border-white/10">
+                                                                    <button
+                                                                        onClick={() => { setEditingEntry(entry); setEditForm({ ...editForm, client_name: entry.client_name, hours: entry.hours.toString().replace('.', ','), start_time: entry.start_time || '', end_time: entry.end_time || '', note: entry.note || '', reason: '' }) }}
+                                                                        title="Bearbeiten"
+                                                                        className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-white/50 bg-white/5 border border-white/10 hover:bg-white/10 hover:text-white"
+                                                                    >
+                                                                        <Edit2 size={14} />
+                                                                    </button>
+
+                                                                    {entry.deletion_requested_at ? (
+                                                                        <>
+                                                                            <button
+                                                                                onClick={() => setRejectionModal({ isOpen: true, entryId: entry.id, reason: '' })}
+                                                                                className="w-8 h-8 rounded-lg flex items-center justify-center bg-orange-500/20 text-orange-400 border border-orange-500/50 hover:bg-orange-500/30"
+                                                                            >
+                                                                                <XCircle size={14} />
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={() => deleteEntry(entry.id, entry.deletion_request_reason || 'Löschantrag genehmigt')}
+                                                                                className="w-8 h-8 rounded-lg flex items-center justify-center bg-red-500 text-white border border-red-600 shadow-lg shadow-red-900/20 hover:bg-red-600"
+                                                                            >
+                                                                                <Trash2 size={14} />
+                                                                            </button>
+                                                                        </>
+                                                                    ) : (
+                                                                        <button
+                                                                            onClick={() => handleDeleteEntryWithReason(entry.id)}
+                                                                            title="Löschen"
+                                                                            className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-red-400/50 bg-red-500/5 border-red-500/10 hover:bg-red-500/20 hover:text-red-300"
+                                                                        >
+                                                                            <Trash2 size={14} />
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
+
+                                                    {entry.note && (
+                                                        <div className="mt-3 pt-3 border-t border-white/5 w-full flex items-start gap-1.5 text-white/50 text-xs italic">
+                                                            <StickyNote size={12} className="mt-0.5 shrink-0" />
+                                                            <span>{entry.note}</span>
+                                                        </div>
+                                                    )}
+
+                                                    {/* LATE REASON BLOCK */}
+                                                    {entry.late_reason && (
+                                                        <div className="mt-2 pt-2 border-t border-amber-500/20 w-full">
+                                                            <div className="flex items-center gap-2 text-amber-300 bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
+                                                                <AlertTriangle size={14} className="shrink-0" />
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-xs font-bold uppercase tracking-wider text-amber-400">Verspätungsgrund</span>
+                                                                    <span className="text-sm italic text-amber-200">"{entry.late_reason}"</span>
+                                                                    {/* Confirmed by for Late Reason (usually same as entry confirmation) */}
+                                                                    {entry.confirmed_at && (
+                                                                        <span className="text-[10px] text-amber-400/60 mt-1 flex items-center gap-1">
+                                                                            <CheckCircle size={10} />
+                                                                            Bestätigt von {users.find(u => u.user_id === entry.confirmed_by)?.display_name || 'Admin'}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
                             </div>
 
                             <div className="bg-white/5 p-5 rounded-2xl border border-white/10 shadow-inner">
