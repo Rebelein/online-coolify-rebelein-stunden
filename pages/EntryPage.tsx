@@ -6,7 +6,9 @@ import { GlassCard, GlassInput, GlassButton } from '../components/GlassCard';
 import GlassDatePicker from '../components/GlassDatePicker';
 import { PlusCircle, Save, X, Calendar, ChevronLeft, ChevronRight, Clock, Coffee, Building, Briefcase, Truck, Sun, Heart, AlertCircle, AlertTriangle, CheckCircle, Info, Lock, History, User, FileText, Palmtree, UserX, Copy, Loader2, RefreshCw, Send, ArrowLeft, Trash2, CalendarDays, Plus, ChevronDown, ChevronUp, ArrowRight, MessageSquareText, StickyNote, Building2, Warehouse, Car, Stethoscope, PartyPopper, Ban, TrendingDown, Play, Square, UserCheck, Check, UserPlus, ArrowLeftRight, Baby, Coins, PiggyBank, Siren, Percent, ShieldAlert, Edit2, XCircle, Hash } from 'lucide-react';
 import { TimeSegment, QuotaChangeNotification, TimeEntry } from '../types';
-import { formatDuration, getGracePeriodDate } from '../services/utils/timeUtils';
+import { formatDuration, getGracePeriodDate, formatMinutesToDecimal } from '../services/utils/timeUtils';
+import { analyzeMontagebericht, uploadBackupFile } from '../services/pdfImportService';
+
 
 // Zentrale Konfiguration für das Modal (Icons & Farben)
 const ENTRY_TYPES_CONFIG = {
@@ -142,6 +144,126 @@ const EntryPage: React.FC = () => {
     // NEU: Order Number State
     const [orderNumber, setOrderNumber] = useState('');
     const [showOrderInput, setShowOrderInput] = useState(false);
+
+    // NEU: PDF Analyse State
+    const [isAnalysing, setIsAnalysing] = useState(false);
+    const [analysisMsg, setAnalysisMsg] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setIsAnalysing(true);
+        setAnalysisMsg(null);
+
+        try {
+            // 1. Backup Upload
+            uploadBackupFile(file).catch(err => console.error("Backup failed", err));
+
+            // 2. Analyse
+            const result = await analyzeMontagebericht(file);
+
+            if (result.success) {
+                // Kunde & Auftrag setzen
+                // Wenn wir eine Auftragsnummer haben, packen wir sie NICHT mehr in den Namen (redundant),
+                // sondern nur in das extra Feld.
+                if (result.orderNumber) {
+                    setOrderNumber(result.orderNumber);
+                    setShowOrderInput(true);
+                    if (result.customerName) setClient(result.customerName);
+                } else {
+                    // Fallback: Keine separate Nummer erkannt -> Alles in den Namen (wie bisher)
+                    const projectText = `${result.orderNumber || ''} ${result.customerName || ''}`.trim();
+                    if (projectText) setClient(projectText);
+                }
+
+                // Zeiten berechnen
+                if (result.hours && result.hours > 0) {
+                    // WICHTIG: State muss "1.5" sein (mit Punkt), nicht "1,50" (Komma), da Input Type="number" (oder ähnlich) das erwartet.
+                    // Die Anzeige im Input formatieren wir ggf. anders, aber der State hours sollte raw sein.
+                    setHours(result.hours.toString());
+
+                    if (projectStartTime) {
+                        const calculatedEndTime = addMinutesToTime(projectStartTime, result.hours * 60);
+                        setProjectEndTime(calculatedEndTime);
+                    }
+                }
+
+                setAnalysisMsg(`✅ ${result.message}`);
+            } else {
+                setAnalysisMsg(`⚠️ ${result.message}`);
+            }
+
+        } catch (error) {
+            setAnalysisMsg("❌ Fehler beim Import");
+            console.error(error);
+        } finally {
+            setIsAnalysing(false);
+            // Reset Input
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
+    // --- SHARE TARGET HANDLING START ---
+    useEffect(() => {
+        const checkSharedFile = async () => {
+            // 1. Check URL param or just check IDB directly?
+            // Checking IDB is safe.
+            // DB Config must match SW
+            const DB_NAME = 'share-target-db';
+            const STORE_NAME = 'shared-files';
+
+            try {
+                // Check if IDB exists
+                const dbs = await window.indexedDB.databases?.();
+                if (dbs && !dbs.find(db => db.name === DB_NAME)) return;
+
+                const request = indexedDB.open(DB_NAME, 1);
+
+                request.onsuccess = (e: any) => {
+                    const db = e.target.result;
+                    // Check if store exists (might be empty db)
+                    if (!db.objectStoreNames.contains(STORE_NAME)) return;
+
+                    const tx = db.transaction(STORE_NAME, 'readwrite');
+                    const store = tx.objectStore(STORE_NAME);
+
+                    const getAll = store.getAll();
+                    getAll.onsuccess = () => {
+                        const files = getAll.result;
+                        if (files && files.length > 0) {
+                            console.log("Shared file found:", files[0]);
+                            const file = files[0];
+
+                            // 2. Trigger Upload Logic manually
+                            // We need to verify if file is valid Blob/File
+                            if (file instanceof Blob) {
+                                // Create a synthetic event or extract logic
+                                // Extracting logic is cleaner, but wrapping in event is faster for now
+                                const syntheticEvent = {
+                                    target: { files: [file] }
+                                } as any;
+                                handleFileUpload(syntheticEvent);
+
+                                // 3. Notify User
+                                alert("Ein Montagebericht wurde geteilt und wird analysiert!");
+                            }
+
+                            // 4. Clear Store
+                            store.clear();
+                        }
+                    };
+                };
+            } catch (err) {
+                console.error("Error checking shared files:", err);
+            }
+        };
+
+        // Delay slightly to ensure SW has responded and redirected
+        setTimeout(checkSharedFile, 1000);
+    }, []);
+    // --- SHARE TARGET HANDLING END ---
 
     // NEU: State für verantwortlichen Monteur
     const [responsibleUserId, setResponsibleUserId] = useState<string>(() => {
@@ -1582,6 +1704,39 @@ const EntryPage: React.FC = () => {
                     </GlassCard>
                 </div>
             )}
+
+            {/* NEW: PDF IMPORT BUTTON */}
+            <div className="mb-6 animate-in slide-in-from-top-2">
+                <input
+                    type="file"
+                    accept="application/pdf"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    className="hidden"
+                />
+
+                <GlassButton
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isAnalysing}
+                    className={`w-full flex items-center justify-center gap-3 py-4 ${isAnalysing ? 'opacity-70' : ''}`}
+                    variant="primary"
+                >
+                    {isAnalysing ? (
+                        <Loader2 className="animate-spin" size={20} />
+                    ) : (
+                        <FileText size={20} />
+                    )}
+                    <span className="font-bold">
+                        {isAnalysing ? 'Analysiere Bericht...' : 'Montagebericht (PDF) importieren'}
+                    </span>
+                </GlassButton>
+
+                {analysisMsg && (
+                    <div className={`mt-2 text-xs text-center p-2 rounded-lg border font-medium ${analysisMsg.includes('✅') ? 'bg-green-500/10 border-green-500/20 text-green-300' : 'bg-red-500/10 border-red-500/20 text-red-300'}`}>
+                        {analysisMsg}
+                    </div>
+                )}
+            </div>
 
             <div className="flex flex-col md:grid md:grid-cols-12 gap-6 md:gap-8 items-start">
 

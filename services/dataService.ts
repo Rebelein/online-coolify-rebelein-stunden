@@ -832,7 +832,8 @@ export const useSettings = () => {
         employment_start_date: data.employment_start_date || undefined,
         initial_overtime_balance: data.initial_overtime_balance || 0,
         // Added required_confirmation handling
-        require_confirmation: data.require_confirmation !== undefined ? data.require_confirmation : DEFAULT_SETTINGS.require_confirmation
+        require_confirmation: data.require_confirmation !== undefined ? data.require_confirmation : DEFAULT_SETTINGS.require_confirmation,
+        invoice_keyword: data.invoice_keyword
       });
     } else if (error && error.code === 'PGRST116') {
       const { error: insertError } = await supabase.from('user_settings').insert({
@@ -885,6 +886,7 @@ export const useSettings = () => {
         initial_overtime_balance: newSettings.initial_overtime_balance,
         // Added required_confirmation to update
         require_confirmation: newSettings.require_confirmation,
+        invoice_keyword: newSettings.invoice_keyword,
         updated_at: new Date().toISOString()
       });
 
