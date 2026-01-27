@@ -2,6 +2,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { supabase } from './supabaseClient';
 
 // Worker Konfiguration für Vite
+// @ts-ignore
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
