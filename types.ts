@@ -23,6 +23,10 @@ export interface TimeEntry {
   rejection_reason?: string; // Begründung für Ablehnung
   rejected_by?: string; // ID des Ablehners
   rejected_at?: string; // Zeitpunkt der Ablehnung
+  // Peer-to-Peer Sharing
+  is_proposal?: boolean; // New: If true, needs acceptance
+  shared_by_user_id?: string; // New: Creator of the proposal
+  is_locked?: boolean; // New: If true, read-only
   // Soft Delete
   is_deleted?: boolean;
   deleted_at?: string;

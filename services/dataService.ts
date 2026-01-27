@@ -139,6 +139,64 @@ export const usePeerReviews = () => {
   return { reviews, processReview, fetchReviews };
 };
 
+export const useProposals = () => {
+  const [proposals, setProposals] = useState<TimeEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchProposals = useCallback(async () => {
+    setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // Fetch entries where I am the target, it is a proposal, and not yet accepted (is_proposal=true)
+    const { data, error } = await supabase
+      .from('time_entries')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('is_proposal', true)
+      .order('date', { ascending: false });
+
+    if (error) console.error("Error fetching proposals", error);
+    else setProposals(data as TimeEntry[]);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchProposals();
+    const channel = supabase
+      .channel('realtime_proposals')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'time_entries' }, () => {
+        fetchProposals();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchProposals]);
+
+  const acceptProposal = async (entryId: string) => {
+    const { error } = await supabase.from('time_entries').update({
+      is_proposal: false,
+      is_locked: true // Lock accepted proposals
+    }).eq('id', entryId);
+
+    if (error) {
+      alert("Fehler beim Übernehmen: " + error.message);
+    } else {
+      await fetchProposals();
+    }
+  };
+
+  const discardProposal = async (entryId: string) => {
+    const { error } = await supabase.from('time_entries').delete().eq('id', entryId);
+    if (error) {
+      alert("Fehler beim Verwerfen: " + error.message);
+    } else {
+      await fetchProposals();
+    }
+  };
+
+  return { proposals, loading, acceptProposal, discardProposal };
+};
+
 export const useTimeEntries = (customUserId?: string) => {
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -256,14 +314,14 @@ export const useTimeEntries = (customUserId?: string) => {
     setLoading(false);
   }, [customUserId]);
 
-  const addEntry = async (entry: Omit<TimeEntry, 'id' | 'created_at' | 'user_id'>) => {
-    if (lockedDays.includes(entry.date)) {
+  const addEntry = async (entry: Omit<TimeEntry, 'id' | 'created_at' | 'user_id'>, overrideTargetUserId?: string) => {
+    if (lockedDays.includes(entry.date) && !overrideTargetUserId) {
       alert("Dieser Tag ist gesperrt und kann nicht bearbeitet werden.");
       return;
     }
 
     const { data: { user } } = await supabase.auth.getUser();
-    const targetUserId = customUserId || user?.id;
+    const targetUserId = overrideTargetUserId || customUserId || user?.id;
 
     if (!targetUserId) {
       console.error("No user ID found for addEntry");
