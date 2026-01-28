@@ -1203,688 +1203,166 @@ const EntryPage: React.FC = () => {
         }
     };
 
+    // --- HISTORY HELPERS ---
+    const historyEntries = entries
+        .filter(e => e.date === date && !e.is_deleted)
+        .sort((a, b) => new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime());
+
+    const handleEditEntry = (entry: TimeEntry) => {
+        setEditingEntryId(entry.id);
+        setEntryType((entry.type as EntryType) || 'work');
+        setClient(entry.client_name);
+        setHours(entry.hours ? entry.hours.toString() : '');
+        setProjectStartTime(entry.start_time || '');
+        setProjectEndTime(entry.end_time || '');
+        setNote(entry.note || '');
+        setOrderNumber(entry.order_number || '');
+        setShowOrderInput(!!entry.order_number);
+    };
+
+    const handleDeleteEntry = async (id: string) => {
+        if (!confirm('Eintrag wirklich löschen?')) return;
+        const { error } = await supabase.from('time_entries').update({ is_deleted: true, deleted_at: new Date().toISOString() }).eq('id', id);
+        if (error) alert('Fehler beim Löschen');
+    };
+
     return (
-        <div className="p-6 flex flex-col h-full pb-24 overflow-y-auto md:max-w-5xl md:mx-auto md:w-full md:justify-center">
-            {/* COMPACT HEADER & QUICK ACTIONS */}
-            <header className="mb-4 flex items-center justify-between">
-                <div>
-                    <h1 className="text-xl font-bold text-white">
-                        Hallo, {settings.display_name?.split(' ')[0]}
-                    </h1>
-                    <p className="text-white/50 text-xs">Zeiterfassung</p>
-                </div>
+        <div className="relative w-full h-full grid grid-cols-1 md:grid-cols-12 md:overflow-hidden text-white">
+            {/* LEFT COLUMN (Header + Form) */}
+            <div className="md:col-span-7 lg:col-span-8 flex flex-col h-full overflow-y-auto overflow-x-hidden p-4 md:p-6 lg:p-8 glass-scrollbar pb-32 md:pb-6">
 
-                <div className="flex gap-2">
-                    {/* PDF IMPORT COMPACT */}
-                    <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="w-10 h-10 rounded-xl bg-teal-500/10 border border-teal-500/20 text-teal-300 flex items-center justify-center hover:bg-teal-500/20 transition-colors"
-                        title="PDF Importieren"
+                {/* UNIFIED HEADER & DATE SECTION */}
+                <div className="mb-8 animate-in slide-in-from-top-2 duration-500">
+                    <header className="flex items-end justify-between mb-6">
+                        <div>
+                            <p className="text-teal-400 font-bold uppercase tracking-widest text-xs mb-1">Zeiterfassung</p>
+                            <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">
+                                Hallo, <span className="text-transparent bg-clip-text bg-gradient-to-r from-teal-200 to-emerald-200">{settings.display_name?.split(' ')[0]}</span>
+                            </h1>
+                        </div>
+
+                        {/* DESKTOP DATE PICKER (Visible on md+) */}
+                        <div className="hidden md:flex gap-2">
+                            <GlassButton variant="secondary" onClick={setYesterday} className="!py-2 !px-4 !text-xs !bg-white/5 hover:!bg-white/10">Gestern</GlassButton>
+                            <GlassButton variant="primary" onClick={setToday} className="!py-2 !px-4 !text-xs">Heute</GlassButton>
+                            <div className="w-px h-6 bg-white/10 mx-1"></div>
+                            <GlassButton
+                                variant="secondary"
+                                onClick={() => fileInputRef.current?.click()}
+                                className="!py-2 !px-4 !text-xs !bg-blue-500/10 !text-blue-300 hover:!bg-blue-500/20 !border-blue-500/20"
+                            >
+                                {isAnalysing ? <Loader2 size={14} className="animate-spin mr-2" /> : <FileText size={14} className="mr-2" />}
+                                Montageauftrag analysieren
+                            </GlassButton>
+                        </div>
+                    </header>
+
+                    {/* MAIN DATE CARD */}
+                    <GlassCard
+                        onClick={() => setShowDatePicker(true)}
+                        hoverEffect={true}
+                        className="relative !p-6 flex items-center justify-between group cursor-pointer border-teal-500/20 bg-gradient-to-br from-white/5 to-teal-900/10"
                     >
-                        {isAnalysing ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
+                        <div className="flex items-center gap-5">
+                            <div className="w-14 h-14 rounded-2xl bg-teal-500/10 flex items-center justify-center text-teal-300 group-hover:scale-110 group-hover:bg-teal-500/20 transition-all duration-300">
+                                <CalendarDays size={28} />
+                            </div>
+                            <div>
+                                <div className="text-xs font-bold text-teal-200/60 uppercase tracking-wider mb-1">Ausgewähltes Datum</div>
+                                <div className="text-2xl md:text-3xl font-bold text-white font-mono tracking-tight">{displayDate}</div>
+                            </div>
+                        </div>
+                        <ChevronDown className="text-white/20 group-hover:text-teal-400 transition-colors" size={24} />
+                    </GlassCard>
+                </div>
+
+                {/* PDF & ACTIONS BAR (Mobile Only Compact) */}
+                <div className="md:hidden flex gap-3 mb-6 overflow-x-auto pb-2 scrollbar-hide">
+                    <button onClick={setYesterday} className="whitespace-nowrap px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold text-white/60">Gestern</button>
+                    <button onClick={setToday} className="whitespace-nowrap px-4 py-2 rounded-xl bg-teal-500/10 border border-teal-500/20 text-xs font-bold text-teal-300">Heute</button>
+                    <div className="w-px h-8 bg-white/10 mx-1"></div>
+                    <button onClick={() => fileInputRef.current?.click()} className="whitespace-nowrap px-4 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20 text-xs font-bold text-blue-300 flex items-center gap-2">
+                        {isAnalysing ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />} PDF Import
                     </button>
-                    {/* HIDDEN INPUT FOR PDF */}
-                    <input
-                        type="file"
-                        accept="application/pdf"
-                        ref={fileInputRef}
-                        onChange={handleFileUpload}
-                        className="hidden"
-                    />
                 </div>
-            </header>
 
-            {/* ERROR / STATUS MESSAGES FOR PDF (Compact) */}
-            {analysisMsg && (
-                <div className={`mb-4 text-xs text-center p-2 rounded-lg border font-medium ${analysisMsg.includes('✅') ? 'bg-green-500/10 border-green-500/20 text-green-300' : 'bg-red-500/10 border-red-500/20 text-red-300'}`}>
-                    {analysisMsg}
-                </div>
-            )}
+                {/* HIDDEN INPUT FOR PDF */}
+                <input type="file" accept="application/pdf" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
 
-            {/* DEACTIVATED ACCOUNT BANNER */}
-
-
-
-
-            {/* NOTIFICATIONS (Existing...) */}
-
-
-            {/* DEACTIVATED ACCOUNT BANNER */}
-            {settings?.is_active === false && (
-                <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center gap-4 animate-in slide-in-from-top-2">
-                    <div className="p-3 bg-red-500/20 rounded-full text-red-400">
-                        <Ban size={24} />
+                {/* ERROR MESSAGES / STATUS */}
+                {analysisMsg && (
+                    <div className={`mb-6 p-4 rounded-2xl border backdrop-blur-md animate-in slide-in-from-top-4 ${analysisMsg.includes('✅') ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200' : 'bg-red-500/10 border-red-500/20 text-red-200'}`}>
+                        <div className="flex items-center gap-3 font-medium">
+                            {analysisMsg.includes('✅') ? <CheckCircle size={20} /> : <AlertTriangle size={20} />}
+                            {analysisMsg}
+                        </div>
                     </div>
-                    <div>
-                        <h3 className="text-red-300 font-bold text-base">Account deaktiviert</h3>
-                        <p className="text-red-200/70 text-sm">
-                            Dein Account wurde deaktiviert. Du kannst keine neuen Einträge erstellen oder bearbeiten.
-                        </p>
-                    </div>
-                </div>
-            )}
+                )}
 
-            {/* PROPOSAL INBOX */}
-            {proposals.length > 0 && (
-                <div className="mb-6 space-y-3 animate-in slide-in-from-top-2">
-                    <div className="flex items-center gap-2 px-1">
-                        <Users size={16} className="text-indigo-400" />
-                        <h3 className="text-sm font-bold text-white uppercase tracking-wider">Team Vorschläge</h3>
-                        <span className="bg-indigo-500/20 text-indigo-300 text-[10px] px-1.5 py-0.5 rounded-full font-bold">{proposals.length}</span>
-                    </div>
-
-                    {proposals.map(prop => (
-                        <GlassCard key={prop.id} className="!p-3 border-indigo-500/30 bg-indigo-900/10 hover:bg-indigo-900/20 transition-colors">
-                            <div className="flex justify-between items-start gap-3">
-                                <div className="flex-1">
-                                    <div className="flex justify-between items-start mb-1">
-                                        <div className="font-bold text-white text-base">{prop.client_name}</div>
-                                        <div className="text-indigo-300 font-mono font-bold">{formatDuration(prop.hours)}h</div>
-                                    </div>
-                                    <div className="text-white/60 text-xs flex gap-2 mb-2">
-                                        <span>{new Date(prop.date).toLocaleDateString()}</span>
-                                        {prop.start_time && <span>• {prop.start_time} - {prop.end_time}</span>}
-                                    </div>
-                                    {prop.note && (
-                                        <div className="text-white/80 text-sm bg-black/20 p-2 rounded mb-2 italic">"{prop.note}"</div>
-                                    )}
-                                    <div className="text-[10px] text-white/40 uppercase tracking-widest">Vorgeschlagen von Kollege</div>
-                                </div>
-
-                                <div className="flex flex-col gap-2">
-                                    <button
-                                        onClick={() => acceptProposal(prop.id)}
-                                        className="p-2 bg-emerald-500/20 text-emerald-300 rounded-lg hover:bg-emerald-500/30 transition-colors"
-                                        title="Übernehmen"
-                                    >
-                                        <Check size={18} />
-                                    </button>
-                                    <button
-                                        onClick={() => discardProposal(prop.id)}
-                                        className="p-2 bg-red-500/20 text-red-300 rounded-lg hover:bg-red-500/30 transition-colors"
-                                        title="Ablehnen"
-                                    >
-                                        <X size={18} />
-                                    </button>
-                                </div>
+                {/* DEACTIVATED ACCOUNT */}
+                {settings?.is_active === false && (
+                    <GlassCard className="mb-6 !border-red-500/30 !bg-red-900/10">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-red-500/20 rounded-full text-red-400"><Ban size={24} /></div>
+                            <div>
+                                <h3 className="text-red-300 font-bold">Account deaktiviert</h3>
+                                <p className="text-red-200/70 text-sm">Keine neuen Einträge möglich.</p>
                             </div>
-                        </GlassCard>
-                    ))}
-                </div>
-            )}
+                        </div>
+                    </GlassCard>
+                )}
 
-            {/* PENDING NOTIFICATION BANNER (Trigger to re-open modal) */}
-            {pendingQuotaNotifications.length > 0 && !isNotificationModalOpen && (
-                <button
-                    onClick={() => setIsNotificationModalOpen(true)}
-                    className="mb-4 w-full bg-purple-500/10 border border-purple-500/20 p-3 rounded-xl flex items-center justify-between animate-in fade-in slide-in-from-top-2 hover:bg-purple-500/20 transition-colors group"
+                {/* PROPOSAL INBOX */}
+                {proposals.length > 0 && (
+                    <div className="mb-8 animate-in slide-in-from-top-4">
+                        <div className="flex items-center gap-2 mb-3 px-1">
+                            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+                            <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-wider">Vorschläge ({proposals.length})</h3>
+                        </div>
+                        <div className="grid gap-3">
+                            {proposals.map(prop => (
+                                <GlassCard key={prop.id} className="!p-4 border-indigo-500/30 bg-indigo-900/5 hover:bg-indigo-900/10">
+                                    <div className="flex justify-between items-start gap-4">
+                                        <div className="flex-1">
+                                            <div className="flex justify-between items-center mb-1">
+                                                <div className="font-bold text-white">{prop.client_name}</div>
+                                                <div className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-xs font-mono font-bold">{formatDuration(prop.hours)}h</div>
+                                            </div>
+                                            <div className="text-white/50 text-xs flex flex-wrap gap-2">
+                                                <span>{new Date(prop.date).toLocaleDateString()}</span>
+                                                {prop.start_time && <span>• {prop.start_time} - {prop.end_time}</span>}
+                                            </div>
+                                            {prop.note && <div className="mt-2 text-white/70 text-sm italic">"{prop.note}"</div>}
+                                        </div>
+                                        <div className="flex flex-col gap-2 shrink-0">
+                                            <button onClick={() => acceptProposal(prop.id)} className="p-2 bg-emerald-500/20 text-emerald-300 rounded-xl hover:bg-emerald-500/30"><Check size={18} /></button>
+                                            <button onClick={() => discardProposal(prop.id)} className="p-2 bg-red-500/20 text-red-300 rounded-xl hover:bg-red-500/30"><X size={18} /></button>
+                                        </div>
+                                    </div>
+                                </GlassCard>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* NOTIFICATIONS & ALERTS */}
+                {pendingQuotaNotifications.length > 0 && !isNotificationModalOpen && (
+                    <div onClick={() => setIsNotificationModalOpen(true)} className="cursor-pointer mb-6 p-4 rounded-2xl bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/20 transition-all flex items-center gap-4 group">
+                        <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-300 group-hover:scale-110 transition-transform"><Palmtree size={20} /></div>
+                        <div>
+                            <div className="font-bold text-purple-200 text-sm">Neuer Urlaubsanspruch</div>
+                            <div className="text-xs text-purple-300/60">Bestätigung erforderlich</div>
+                        </div>
+                    </div>
+                )}
+
+                <form
+                    onSubmit={(e) => {
+                        if (settings?.is_active === false) { e.preventDefault(); return; }
+                        handleSubmit(e);
+                    }}
+                    className={`grid gap-6 w-full ${settings?.is_active === false ? 'opacity-50 pointer-events-none grayscale' : ''}`}
                 >
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center ring-1 ring-purple-500/30 group-hover:bg-purple-500/30 transition-colors">
-                            <Palmtree size={20} className="text-purple-300" />
-                            <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-gray-900"></div>
-                        </div>
-                        <div className="text-left">
-                            <div className="text-sm font-bold text-white flex items-center gap-2">
-                                Urlaubsanspruch
-                                <span className="bg-purple-500/20 text-purple-200 text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider">Neu</span>
-                            </div>
-                            <div className="text-xs text-white/50">Bitte neuen Anspruch bestätigen</div>
-                        </div>
-                    </div>
-                    <div className="bg-purple-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-lg shadow-purple-900/20 group-hover:scale-105 transition-transform">
-                        Ansehen
-                    </div>
-                </button>
-            )}
-
-            {/* SUCCESS MODAL */}
-            {successModal.isOpen && (
-                <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                    <GlassCard className="w-full max-w-sm border-emerald-500/50 shadow-2xl relative bg-gray-900/95 flex flex-col items-center p-6 text-center">
-                        <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
-                            <Check className="text-emerald-400 w-8 h-8" />
-                        </div>
-                        <h3 className="text-xl font-bold text-white mb-2">Erfolg!</h3>
-                        <p className="text-white/70 mb-6">{successModal.message}</p>
-                        <GlassButton
-                            onClick={() => setSuccessModal({ isOpen: false, message: '' })}
-                            className="bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 w-full justify-center"
-                        >
-                            Verstanden
-                        </GlassButton>
-                    </GlassCard>
-                </div>
-            )}
-
-            {/* NEW: PERSISTENT ENTRY NOTIFICATIONS (Replacing Modal) */}
-            {/* NEW: PERSISTENT ENTRY NOTIFICATIONS (Replacing Modal) */}
-            {entryNotifications.length > 0 && (
-                <div className="mb-6 space-y-4 animate-in slide-in-from-top-2">
-                    {entryNotifications.map(entry => {
-                        const isLegacyDeletion = entry.is_deleted;
-                        const isDeletionRequest = !!entry.deletion_requested_at;
-                        const isDel = isLegacyDeletion || isDeletionRequest;
-
-                        const dateStr = new Date(entry.date).toLocaleDateString('de-DE');
-                        const reason = isDeletionRequest ? entry.deletion_request_reason : (isLegacyDeletion ? entry.deletion_reason : entry.change_reason);
-
-                        return (
-                            <GlassCard key={entry.id} className={`!p-4 border ${isDel ? 'bg-red-900/10 border-red-500/30' : 'bg-orange-900/10 border-orange-500/30'}`}>
-                                <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3">
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <Info size={16} className={isDel ? "text-red-400" : "text-orange-400"} />
-                                            <span className={`text-xs font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${isDel ? 'bg-red-500/20 text-red-300' : 'bg-orange-500/20 text-orange-300'}`}>
-                                                {isDel ? 'Löschung' : 'Änderung'}
-                                            </span>
-                                            <span className="text-white/50 text-xs">wartet auf Bestätigung</span>
-                                        </div>
-                                        <div className="text-white font-bold text-lg">{entry.client_name}</div>
-                                        <div className="text-white/60 text-sm mb-2">{dateStr}</div>
-
-                                        <div className="bg-black/20 p-2 rounded text-sm text-white/80 italic border border-white/5">
-                                            "{reason || 'Kein Grund angegeben'}"
-                                        </div>
-                                    </div>
-
-                                    <div className="flex items-center justify-end w-full md:w-auto gap-2">
-                                        {!isDel && (
-                                            <button
-                                                onClick={() => {
-                                                    alert("Um Details zu sehen oder abzulehnen, nutze bitte das 'Verlauf'-Symbol direkt am Eintrag unten.");
-                                                }}
-                                                className="flex items-center gap-2 px-3 py-2 rounded-lg font-bold text-xs bg-white/10 text-white/70 hover:bg-white/20 hover:text-white transition-colors"
-                                            >
-                                                <Info size={14} /> Details / Ablehnen
-                                            </button>
-                                        )}
-                                        {isDeletionRequest && (
-                                            <button
-                                                onClick={async () => {
-                                                    // REJECT DELETION REQUEST
-                                                    const { error } = await supabase.from('time_entries').update({
-                                                        deletion_requested_at: null,
-                                                        deletion_requested_by: null,
-                                                        deletion_request_reason: null
-                                                    }).eq('id', entry.id);
-
-                                                    if (!error) {
-                                                        setEntryNotifications(prev => prev.filter(e => e.id !== entry.id));
-                                                    } else {
-                                                        alert("Fehler beim Ablehnen: " + error.message);
-                                                    }
-                                                }}
-                                                className="flex items-center gap-2 px-3 py-2 rounded-lg font-bold text-xs bg-white/10 text-white/70 hover:bg-white/20 hover:text-white transition-colors"
-                                            >
-                                                <XCircle size={14} /> Behalten (Ablehnen)
-                                            </button>
-                                        )}
-                                        <button
-                                            onClick={() => confirmEntryNotification(entry)}
-                                            className={`
-                                                flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm shadow-lg transition-all hover:scale-105 active:scale-95
-                                                ${isDel
-                                                    ? 'bg-red-500/20 text-red-100 border border-red-500/30 hover:bg-red-500/30'
-                                                    : 'bg-orange-500/20 text-orange-100 border border-orange-500/30 hover:bg-orange-500/30'}
-                                            `}
-                                        >
-                                            <CheckCircle size={16} />
-                                            {isDel ? 'Löschen bestätigen' : 'Bestätigen'}
-                                        </button>
-                                    </div>
-                                </div>
-                            </GlassCard>
-                        );
-                    })}
-                </div>
-            )}
-
-            {/* CORRECTION MODAL */}
-            {correctionModal.isOpen && correctionModal.entry && (
-                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                    <GlassCard className="w-full max-w-lg border-red-500/50 shadow-2xl relative bg-gray-900/95 overflow-hidden flex flex-col max-h-[90vh]">
-                        <div className="p-4 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-red-900/20 to-transparent">
-                            <div className="flex items-center gap-3">
-                                <RefreshCw className="text-red-400" size={24} />
-                                <div>
-                                    <h2 className="text-lg font-bold text-white">Eintrag korrigieren</h2>
-                                    <p className="text-xs text-white/50">{new Date(correctionModal.entry.date).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-                                </div>
-                            </div>
-                            <button onClick={() => setCorrectionModal({ isOpen: false, entry: null, form: {} })} className="p-2 hover:bg-white/10 rounded-full text-white/50 hover:text-white transition-colors">
-                                <X size={24} />
-                            </button>
-                        </div>
-
-                        <div className="p-6 overflow-y-auto space-y-6">
-                            {/* Rejection Reason Display */}
-                            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 flex gap-3 items-start">
-                                <AlertCircle className="text-red-400 shrink-0 mt-0.5" size={20} />
-                                <div>
-                                    <span className="text-xs font-bold text-red-300 uppercase tracking-wider block mb-1">Ablehnungsgrund</span>
-                                    <p className="text-white italic">"{correctionModal.entry.rejection_reason}"</p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-white/60 uppercase mb-1.5 ml-1">Kunde / Projekt</label>
-                                    <GlassInput
-                                        value={correctionModal.form.client_name}
-                                        onChange={e => setCorrectionModal(prev => ({ ...prev, form: { ...prev.form, client_name: e.target.value } }))}
-                                        placeholder="Kunde..."
-                                    />
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-xs font-bold text-white/60 uppercase mb-1.5 ml-1">Von</label>
-                                        <GlassInput
-                                            type="time"
-                                            value={correctionModal.form.start}
-                                            onChange={e => setCorrectionModal(prev => ({ ...prev, form: { ...prev.form, start: e.target.value } }))}
-                                            className="text-center"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-white/60 uppercase mb-1.5 ml-1">Bis</label>
-                                        <GlassInput
-                                            type="time"
-                                            value={correctionModal.form.end}
-                                            onChange={e => setCorrectionModal(prev => ({ ...prev, form: { ...prev.form, end: e.target.value } }))}
-                                            className="text-center"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-xs font-bold text-white/60 uppercase mb-1.5 ml-1">Stunden (Gesamt)</label>
-                                    <GlassInput
-                                        type="number"
-                                        step="0.25"
-                                        value={correctionModal.form.hours}
-                                        onChange={e => {
-                                            const newHours = e.target.value;
-                                            setCorrectionModal(prev => {
-                                                const start = prev.form.start;
-                                                let newEnd = prev.form.end;
-
-                                                if (start && newHours) {
-                                                    const h = parseFloat(newHours);
-                                                    if (!isNaN(h)) {
-                                                        const [hours, minutes] = start.split(':').map(Number);
-                                                        const date = new Date();
-                                                        date.setHours(hours, minutes, 0, 0);
-                                                        date.setMinutes(date.getMinutes() + (h * 60));
-                                                        newEnd = date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-                                                    }
-                                                }
-
-                                                return { ...prev, form: { ...prev.form, hours: newHours, end: newEnd } };
-                                            });
-                                        }}
-                                        className="text-center font-bold text-lg text-emerald-400"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-xs font-bold text-white/60 uppercase mb-1.5 ml-1">Notiz</label>
-                                    <textarea
-                                        value={correctionModal.form.note}
-                                        onChange={e => setCorrectionModal(prev => ({ ...prev, form: { ...prev.form, note: e.target.value } }))}
-                                        className="w-full bg-black/20 border border-white/10 rounded-lg p-3 text-white focus:border-teal-500/50 outline-none resize-none h-24 text-sm"
-                                        placeholder="Notiz zur Arbeit..."
-                                    />
-                                </div>
-
-                                {correctionModal.form.late_reason && (
-                                    <div>
-                                        <label className="block text-xs font-bold text-orange-400/80 uppercase mb-1.5 ml-1">Grund für Verspätung</label>
-                                        <GlassInput
-                                            value={correctionModal.form.late_reason}
-                                            onChange={e => setCorrectionModal(prev => ({ ...prev, form: { ...prev.form, late_reason: e.target.value } }))}
-                                            className="border-orange-500/30 text-orange-200"
-                                        />
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="p-4 border-t border-white/10 bg-black/40 flex justify-end gap-3 sticky bottom-0">
-                            <button
-                                onClick={() => setCorrectionModal({ isOpen: false, entry: null, form: {} })}
-                                className="px-5 py-2.5 rounded-xl border border-white/10 text-white/60 hover:bg-white/5 font-bold transition-all"
-                            >
-                                Abbrechen
-                            </button>
-                            <button
-                                onClick={handleSaveCorrection}
-                                disabled={isSubmitting}
-                                className="px-8 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-red-500 text-white font-bold shadow-lg shadow-red-900/20 hover:scale-105 active:scale-95 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {isSubmitting ? <Loader2 className="animate-spin" size={20} /> : <div className="flex items-center gap-2"><Send size={18} /> Korrektur senden</div>}
-                            </button>
-                        </div>
-                    </GlassCard>
-                </div>
-            )}
-
-            {/* REJECTED ENTRIES NOTIFICATIONS */}
-            {rejectedEntries.length > 0 && (
-                <div className="mb-6 space-y-4 animate-in slide-in-from-top-2">
-                    {rejectedEntries.map(entry => {
-                        const dateStr = new Date(entry.date).toLocaleDateString('de-DE');
-                        const safeType = entry.type || 'work';
-                        const conf = ENTRY_TYPES_CONFIG[safeType];
-                        const Icon = conf.icon;
-
-                        return (
-                            <GlassCard key={entry.id} className="!p-4 border bg-red-900/10 border-red-500/30">
-                                <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3">
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <AlertCircle size={16} className="text-red-400" />
-                                            <span className="text-xs font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-500/20 text-red-300">
-                                                Abgelehnt
-                                            </span>
-                                            <span className="text-white/50 text-xs">Bitte korrigieren</span>
-                                        </div>
-                                        <div className="text-white font-bold text-lg flex items-center gap-2">
-                                            <Icon size={18} className={conf.color} />
-                                            {entry.client_name}
-                                        </div>
-                                        <div className="text-white/60 text-sm mb-2">{dateStr} • {formatDuration(entry.hours)} h</div>
-
-                                        {entry.rejection_reason && (
-                                            <div className="bg-black/20 p-2 rounded text-sm text-white/80 italic border border-white/5">
-                                                "Grund: {entry.rejection_reason}"
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    <div className="flex items-center justify-end w-full md:w-auto gap-2">
-                                        <button
-                                            onClick={() => handleEditRejected(entry)}
-                                            className="flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm bg-red-500/20 text-red-100 border border-red-500/30 hover:bg-red-500/30 shadow-lg transition-all hover:scale-105 active:scale-95"
-                                        >
-                                            <RefreshCw size={16} />
-                                            Korrigieren
-                                        </button>
-                                    </div>
-                                </div>
-                            </GlassCard>
-                        );
-                    })}
-                </div>
-            )}
-
-            {/* HOLIDAY SPECIAL NOTICE */}
-            {(() => {
-                const d = new Date(date);
-                const isSpecial = d.getMonth() === 11 && (d.getDate() === 24 || d.getDate() === 31);
-                const isWeekday = d.getDay() >= 1 && d.getDay() <= 5;
-                if (isSpecial && isWeekday) {
-                    return (
-                        <div className="mb-6 p-4 rounded-xl bg-gradient-to-r from-teal-900/40 to-emerald-900/40 border border-teal-500/30 flex items-center gap-4 animate-in slide-in-from-top-2">
-                            <div className="p-3 bg-teal-500/20 rounded-full text-teal-300">
-                                <PartyPopper size={24} />
-                            </div>
-                            <div>
-                                <h3 className="text-teal-200 font-bold text-sm md:text-base">Sonderregelung {d.getDate()}.12.</h3>
-                                <p className="text-teal-100/70 text-xs md:text-sm">
-                                    Heute gilt: Halber Arbeitstag & halber Tag Sonderurlaub gutgeschrieben! 🎄🎆
-                                </p>
-                            </div>
-                        </div>
-                    );
-                }
-                return null;
-            })()}
-
-            {/* --- LATE ENTRY WARNING MODAL --- */}
-            {lateEntryWarning.isOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                    <GlassCard className="w-full max-w-lg border-red-500/50 shadow-2xl relative bg-gray-900/90">
-                        <div className="p-4 border-b border-white/10 flex items-center gap-3">
-                            <ShieldAlert className="text-red-400" size={24} />
-                            <h2 className="text-lg font-bold text-white">Verspäteter Eintrag</h2>
-                        </div>
-                        <div className="p-4 space-y-4">
-                            <p className="text-white/80">
-                                Du trägst Zeiten für den <strong>{new Date(date).toLocaleDateString('de-DE')}</strong> nach ({lateEntryWarning.diffDays} Tage zurück).
-                                <br />
-                                <span className="text-red-300 text-sm">Einträge, die älter als 2 Tage sind, müssen vom Büro bestätigt werden.</span>
-                            </p>
-
-                            <div>
-                                <label className="text-xs uppercase font-bold text-white/50 block mb-2">Begründung (Pflicht)</label>
-                                {lateReason ? (
-                                    <div className="bg-white/10 p-3 rounded-lg border border-white/10 text-white italic">
-                                        "{lateEntryWarning.reason}"
-                                    </div>
-                                ) : (
-                                    <textarea
-                                        value={lateEntryWarning.reason}
-                                        onChange={(e) => setLateEntryWarning(prev => ({ ...prev, reason: e.target.value }))}
-                                        placeholder="Warum erfolgt der Eintrag erst jetzt?"
-                                        className="w-full bg-black/20 border border-white/10 rounded-lg p-3 text-white focus:border-red-500/50 outline-none resize-none h-24"
-                                    />
-                                )}
-                            </div>
-                        </div>
-                        <div className="p-4 border-t border-white/10 flex gap-3">
-                            <button
-                                onClick={() => setLateEntryWarning({ isOpen: false, diffDays: 0, reason: '' })}
-                                className="flex-1 py-2 rounded-lg border border-white/10 text-white/60 hover:bg-white/5"
-                            >
-                                Abbrechen
-                            </button>
-                            <button
-                                onClick={handleSubmit} // Re-trigger submit
-                                disabled={!lateEntryWarning.reason.trim()}
-                                className="flex-1 py-2 rounded-lg bg-red-500 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold shadow-lg shadow-red-900/20"
-                            >
-                                {lateReason ? 'Bestätigen & Speichern' : 'Mit Begründung speichern'}
-                            </button>
-                        </div>
-                    </GlassCard>
-                </div>
-            )}
-
-            {/* --- AZUBI INSTALLER SELECTION MODAL --- */}
-            {showAzubiInstallerModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                    <GlassCard className="w-full max-w-lg border-teal-500/50 shadow-2xl relative bg-gray-900/90 max-h-[80vh] flex flex-col">
-                        <div className="p-4 border-b border-white/10 flex items-center gap-3 shrink-0">
-                            <UserCheck className="text-teal-400" size={24} />
-                            <h2 className="text-lg font-bold text-white">Mitarbeiter auswählen</h2>
-                        </div>
-                        <div className="p-4 overflow-y-auto">
-                            <p className="text-white/80 mb-4 text-sm">
-                                Als Azubi muss deine Zeit von einem Mitarbeiter bestätigt werden. Bitte wähle aus, wer diesen Eintrag prüfen soll.
-                            </p>
-
-                            <div className="space-y-2">
-                                {installers.filter(i => i.user_id !== settings.user_id && (i.is_visible_to_others !== false || settings.role === 'admin' || settings.role === 'office')).map(installer => (
-                                    <button
-                                        key={installer.user_id}
-                                        onClick={() => {
-                                            setResponsibleUserId(installer.user_id!);
-                                            localStorage.setItem('lastResponsibleUserId', installer.user_id!);
-                                            setShowAzubiInstallerModal(false);
-                                            // Optional: Auto-Update state so next click on submit works, or trigger submit?
-                                            // Ideally we just close it and let them click "Erfassen" again, or we could trigger it.
-                                            // But since handleSubmit uses state, we can't easily re-call it with updated state immediately in one tick without a ref or useEffect.
-                                            // The simplest/safest way is to close modal, update state, and let them click big button again (visual feedback: button now shows user).
-                                        }}
-                                        className="w-full text-left px-4 py-3 rounded-lg bg-white/5 border border-white/10 hover:bg-teal-500/10 hover:border-teal-500/30 transition-all flex items-center justify-between group"
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-xs font-bold text-white/70 group-hover:bg-teal-500/20 group-hover:text-teal-300 transition-colors">
-                                                {installer.display_name.charAt(0)}
-                                            </div>
-                                            <span className="text-white font-medium group-hover:text-teal-200 transition-colors">{installer.display_name}</span>
-                                        </div>
-                                        <ChevronRight size={16} className="text-white/20 group-hover:text-teal-400 opacity-0 group-hover:opacity-100 transition-all" />
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                        <div className="p-4 border-t border-white/10 shrink-0">
-                            <button
-                                onClick={() => setShowAzubiInstallerModal(false)}
-                                className="w-full py-3 rounded-lg border border-white/10 text-white/60 hover:bg-white/5 font-bold transition-colors"
-                            >
-                                Abbrechen
-                            </button>
-                        </div>
-                    </GlassCard>
-                </div>
-            )}
-
-            {/* --- OVERLAP WARNING MODAL --- */}
-            {overlapWarning.isOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-                    <GlassCard className="w-full max-w-lg border-orange-500/50 shadow-2xl relative bg-gray-900/90">
-                        <div className="p-4 border-b border-white/10 flex items-center gap-3">
-                            <AlertCircle className="text-orange-400" size={24} />
-                            <h2 className="text-lg font-bold text-white">Pause überschneidet Projekt</h2>
-                        </div>
-                        <div className="p-4 space-y-4">
-                            <p className="text-white/80">
-                                Die eingetragene Pause überschneidet sich mit folgenden Projekteinträgen:
-                            </p>
-                            <div className="space-y-2">
-                                {overlapWarning.overlappedEntries.map((o, idx) => (
-                                    <div key={idx} className="bg-white/5 border border-white/10 p-3 rounded-lg flex justify-between items-center">
-                                        <div>
-                                            <div className="text-white font-bold">{o.entry.client_name}</div>
-                                            <div className="text-xs text-white/50">{o.entry.start_time} - {o.entry.end_time}</div>
-                                        </div>
-                                        <div className="text-orange-300 font-mono font-bold">
-                                            -{(o.overlapMinutes / 60).toFixed(2)}h
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                            <div className="bg-orange-900/20 border border-orange-500/20 p-3 rounded-lg text-sm text-orange-200">
-                                Soll die Arbeitszeit dieser Projekte automatisch um die Pausenzeit gekürzt werden?
-                            </div>
-                        </div>
-                        <div className="p-4 border-t border-white/10 flex gap-3">
-                            <button
-                                onClick={() => setOverlapWarning({ isOpen: false, overlappedEntries: [], newEntryData: null })}
-                                className="flex-1 py-2 rounded-lg border border-white/10 text-white/60 hover:bg-white/5"
-                            >
-                                Abbrechen
-                            </button>
-                            <button
-                                onClick={confirmOverlap}
-                                className="flex-1 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-bold shadow-lg shadow-orange-900/20"
-                            >
-                                Ja, kürzen & Speichern
-                            </button>
-                        </div>
-                    </GlassCard>
-                </div>
-            )}
-
-            {/* --- NEU: EINGEHENDE BESTÄTIGUNGEN --- */}
-            {pendingReviews.length > 0 && (
-                <div className="mb-6 w-full max-w-5xl mx-auto animate-in slide-in-from-top-4 duration-300">
-                    <GlassCard className="!border-orange-500/30 bg-orange-900/10 !p-4">
-                        <div className="flex items-center gap-2 text-orange-400 font-bold uppercase text-xs tracking-wider mb-3">
-                            <AlertCircle size={16} /> Mitarbeiter-Bestätigungen ausstehend ({pendingReviews.length})
-                        </div>
-                        <div className="space-y-2">
-                            {pendingReviews.map(review => {
-                                // Finde den Namen des Mitarbeiters
-                                const requester = installers.find(u => u.user_id === review.user_id);
-
-                                return (
-                                    <div key={review.id} className="bg-white/5 border border-white/10 rounded-xl p-3 flex flex-col gap-2">
-                                        <div className="flex justify-between items-start">
-                                            <div>
-                                                {/* ANZEIGE DES MITARBEITER-NAMENS */}
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <span className="text-[10px] uppercase font-bold text-teal-400 bg-teal-900/20 px-1.5 py-0.5 rounded flex items-center gap-1">
-                                                        <User size={10} /> {requester?.display_name || 'Unbekannt'}
-                                                    </span>
-                                                </div>
-                                                <div className="font-bold text-white text-sm">{review.client_name}</div>
-                                                <div className="text-xs text-white/50">{new Date(review.date).toLocaleDateString('de-DE')} • {review.hours.toFixed(2)}h</div>
-                                                {review.note && <div className="text-xs text-white/40 italic mt-1">"{review.note}"</div>}
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={() => setRejectingEntryId(review.id)}
-                                                    className="p-2 bg-red-500/20 text-red-300 rounded-lg hover:bg-red-500/30 transition-colors"
-                                                    title="Ablehnen"
-                                                >
-                                                    <X size={16} />
-                                                </button>
-                                                <button
-                                                    onClick={() => processReview(review.id, 'confirm')}
-                                                    className="p-2 bg-emerald-500/20 text-emerald-300 rounded-lg hover:bg-emerald-500/30 transition-colors"
-                                                    title="Bestätigen"
-                                                >
-                                                    <Check size={16} />
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        {/* Reject Reason Input */}
-                                        {rejectingEntryId === review.id && (
-                                            <div className="mt-2 flex gap-2 animate-in fade-in">
-                                                <input
-                                                    type="text"
-                                                    placeholder="Grund für Ablehnung..."
-                                                    value={rejectionReason}
-                                                    onChange={(e) => setRejectionReason(e.target.value)}
-                                                    className="flex-1 bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-red-500/50"
-                                                />
-                                                <button
-                                                    onClick={() => { processReview(review.id, 'reject', rejectionReason); setRejectingEntryId(null); setRejectionReason(''); }}
-                                                    className="px-3 py-1 bg-red-500 text-white text-xs font-bold rounded hover:bg-red-600"
-                                                >
-                                                    Senden
-                                                </button>
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </GlassCard>
-                </div>
-            )}
-
-
-
-            <div className="flex flex-col md:grid md:grid-cols-12 gap-6 md:gap-8 items-start">
-
-                {/* 1. DATUM */}
-                {/* 1. DATUM (COMPACT) */}
-                <div className="order-1 md:col-span-12 lg:col-span-12 w-full mb-2">
-                    <GlassCard className="flex items-center justify-between !p-3 bg-white/5 border-white/10 shadow-lg cursor-pointer hover:bg-white/10 transition-colors" onClick={() => setShowDatePicker(true)}>
-                        <div className="flex items-center gap-3">
-                            <CalendarDays size={20} className="text-teal-300" />
-                            <div className="text-lg font-bold text-white">{displayDate}</div>
-                        </div>
-                        <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-                            <button type="button" onClick={setYesterday} className="text-xs bg-white/10 hover:bg-white/20 px-3 py-2 rounded-lg text-white font-medium transition-colors">
-                                Gestern
-                            </button>
-                            <button type="button" onClick={setToday} className="text-xs bg-teal-500/20 hover:bg-teal-500/40 text-teal-200 px-3 py-2 rounded-lg border border-teal-500/30 font-medium transition-colors">
-                                Heute
-                            </button>
-                        </div>
-                    </GlassCard>
-                </div>
-
-                {/* 2. FORM */}
-                <form onSubmit={(e) => { if (settings?.is_active === false) { e.preventDefault(); return; } handleSubmit(e); }} className={`order-2 md:col-span-7 lg:col-span-8 md:row-span-2 grid gap-6 w-full ${settings?.is_active === false ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
                     <GlassCard className={`!p-3 space-y-3 transition-all duration-300 relative z-20 ${getTypeColor()}`}>
                         {/* LATE ENTRY WARNING & REASON */}
                         {isLateEntry && (
@@ -2202,92 +1680,150 @@ const EntryPage: React.FC = () => {
                         </GlassCard>
                     )}
                 </form>
+            </div>
 
-                {/* 3. ARBEITSZEIT */}
-                <div className="order-3 md:col-span-5 lg:col-span-4 space-y-6 w-full md:col-start-1">
-                    <GlassCard className={`space-y-0 transition-all duration-300 ${settings?.is_active === false ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
-                        <div
-                            className="flex items-center justify-between text-orange-300 cursor-pointer mb-4"
-                            onClick={toggleTimeCard}
-                        >
-                            <div className="flex items-center space-x-2">
-                                <Clock size={20} />
-                                <span className="font-bold uppercase text-xs tracking-wider">Arbeitszeit</span>
-                            </div>
-                            <button className="text-white/50 hover:text-white transition-colors">
-                                {isTimeCardCollapsed ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
-                            </button>
+            {/* RIGHT COLUMN (Time + History) */}
+            <div className="md:col-span-5 lg:col-span-4 h-full overflow-y-auto p-4 md:p-6 space-y-6 glass-scrollbar">
+                <GlassCard className={`space-y-0 transition-all duration-300 ${settings?.is_active === false ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
+                    <div
+                        className="flex items-center justify-between text-orange-300 cursor-pointer mb-4"
+                        onClick={toggleTimeCard}
+                    >
+                        <div className="flex items-center space-x-2">
+                            <Clock size={20} />
+                            <span className="font-bold uppercase text-xs tracking-wider">Arbeitszeit</span>
                         </div>
+                        <button className="text-white/50 hover:text-white transition-colors">
+                            {isTimeCardCollapsed ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
+                        </button>
+                    </div>
 
-                        {!isTimeCardCollapsed && (
-                            <div className="space-y-4 animate-in slide-in-from-top-2 duration-200 fade-in">
-                                {/* START / STOP BUTTON */}
-                                <button
-                                    onClick={handleToggleTimer}
-                                    className={`w-full py-4 rounded-xl flex items-center justify-center gap-3 font-bold text-lg shadow-lg transition-all active:scale-95 ${activeTimerSegment
-                                        ? 'bg-red-500/20 text-red-200 border border-red-500/30 hover:bg-red-500/30 animate-pulse'
-                                        : 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/30 hover:bg-emerald-500/30'
-                                        }`}
-                                >
-                                    {activeTimerSegment ? (
-                                        <><Square size={20} fill="currentColor" /> Stopp</>
-                                    ) : (
-                                        <><Play size={20} fill="currentColor" /> Start</>
-                                    )}
-                                </button>
+                    {!isTimeCardCollapsed && (
+                        <div className="space-y-4 animate-in slide-in-from-top-2 duration-200 fade-in">
+                            {/* START / STOP BUTTON */}
+                            <button
+                                onClick={handleToggleTimer}
+                                className={`w-full py-4 rounded-xl flex items-center justify-center gap-3 font-bold text-lg shadow-lg transition-all active:scale-95 ${activeTimerSegment
+                                    ? 'bg-red-500/20 text-red-200 border border-red-500/30 hover:bg-red-500/30 animate-pulse'
+                                    : 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/30 hover:bg-emerald-500/30'
+                                    }`}
+                            >
+                                {activeTimerSegment ? (
+                                    <><Square size={20} fill="currentColor" /> Stopp</>
+                                ) : (
+                                    <><Play size={20} fill="currentColor" /> Start</>
+                                )}
+                            </button>
 
-                                {dailyLog.segments.map((segment) => (
-                                    <div key={segment.id} className="bg-white/5 rounded-xl p-3 border border-white/5 flex flex-col gap-3 group hover:bg-white/10 transition-colors">
-                                        <div className="flex justify-between items-center">
-                                            <div className="flex items-center gap-2 text-white/70 text-xs font-bold uppercase tracking-wider">
-                                                {segment.type === 'work' ? <><Briefcase size={14} className="text-teal-300" /> Arbeitszeit</> : <><Coffee size={14} className="text-orange-300" /> Pause</>}
-                                            </div>
-                                            <button
-                                                type="button"
-                                                onClick={() => removeSegment(segment.id)}
-                                                className="text-white/20 hover:text-red-400 transition-colors"
-                                            >
-                                                <Trash2 size={14} />
-                                            </button>
+                            {dailyLog.segments.map((segment) => (
+                                <div key={segment.id} className="bg-white/5 rounded-xl p-3 border border-white/5 flex flex-col gap-3 group hover:bg-white/10 transition-colors">
+                                    <div className="flex justify-between items-center">
+                                        <div className="flex items-center gap-2 text-white/70 text-xs font-bold uppercase tracking-wider">
+                                            {segment.type === 'work' ? <><Briefcase size={14} className="text-teal-300" /> Arbeitszeit</> : <><Coffee size={14} className="text-orange-300" /> Pause</>}
                                         </div>
-                                        <div className="flex gap-2 items-center">
-                                            <div className="flex-1">
-                                                <GlassInput
-                                                    type="time"
-                                                    value={segment.start}
-                                                    onChange={(e) => updateSegment(segment.id, 'start', e.target.value)}
-                                                    className="!py-2 !px-2 !text-sm text-center font-mono bg-black/20"
-                                                />
-                                            </div>
-                                            <span className="text-white/30">-</span>
-                                            <div className="flex-1">
-                                                <GlassInput
-                                                    type="time"
-                                                    value={segment.end}
-                                                    onChange={(e) => updateSegment(segment.id, 'end', e.target.value)}
-                                                    className="!py-2 !px-2 !text-sm text-center font-mono bg-black/20"
-                                                />
-                                            </div>
-                                        </div>
-                                        <DebouncedSegmentNote
-                                            initialValue={segment.note || ''}
-                                            onSave={(val) => updateSegment(segment.id, 'note', val)}
-                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => removeSegment(segment.id)}
+                                            className="text-white/20 hover:text-red-400 transition-colors"
+                                        >
+                                            <Trash2 size={14} />
+                                        </button>
                                     </div>
-                                ))}
-                                <div className="grid grid-cols-1 gap-3 pt-3 border-t border-white/5">
-                                    <button
-                                        onClick={() => addSegment('work')}
-                                        className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-teal-500/10 border border-teal-500/20 text-teal-200 text-xs font-bold hover:bg-teal-500/20 transition-colors"
-                                    >
-                                        <Plus size={14} /> Arbeitszeit
-                                    </button>
+                                    <div className="flex gap-2 items-center">
+                                        <div className="flex-1">
+                                            <GlassInput
+                                                type="time"
+                                                value={segment.start}
+                                                onChange={(e) => updateSegment(segment.id, 'start', e.target.value)}
+                                                className="!py-2 !px-2 !text-sm text-center font-mono bg-black/20"
+                                            />
+                                        </div>
+                                        <span className="text-white/30">-</span>
+                                        <div className="flex-1">
+                                            <GlassInput
+                                                type="time"
+                                                value={segment.end}
+                                                onChange={(e) => updateSegment(segment.id, 'end', e.target.value)}
+                                                className="!py-2 !px-2 !text-sm text-center font-mono bg-black/20"
+                                            />
+                                        </div>
+                                    </div>
+                                    <DebouncedSegmentNote
+                                        initialValue={segment.note || ''}
+                                        onSave={(val) => updateSegment(segment.id, 'note', val)}
+                                    />
                                 </div>
+                            ))}
+                            <div className="grid grid-cols-1 gap-3 pt-3 border-t border-white/5">
+                                <button
+                                    onClick={() => addSegment('work')}
+                                    className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-teal-500/10 border border-teal-500/20 text-teal-200 text-xs font-bold hover:bg-teal-500/20 transition-colors"
+                                >
+                                    <Plus size={14} /> Arbeitszeit
+                                </button>
                             </div>
+                        </div>
+                    )}
+                </GlassCard>
+                {/* HISTORY LIST */}
+                <div className="space-y-4 pb-20">
+                    <div className="flex items-center justify-between px-1">
+                        <h3 className="font-bold text-white/50 text-xs uppercase tracking-wider flex items-center gap-2">
+                            Verlauf
+                        </h3>
+                    </div>
+
+                    <div className="space-y-3">
+                        {historyEntries.length > 0 ? (
+                            historyEntries.map(entry => {
+                                const Icon = ENTRY_TYPES_CONFIG[entry.type as EntryType]?.icon;
+                                return (
+                                    <GlassCard key={entry.id} className="!p-3 group hover:bg-white/5 transition-colors border-white/5">
+                                        <div className="flex justify-between items-start gap-3">
+                                            <div className="mt-1 w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center shrink-0 border border-white/5">
+                                                {Icon && <Icon size={16} className="text-white/70" />}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex justify-between items-baseline mb-1">
+                                                    <h4 className="font-bold text-white text-sm truncate">{entry.client_name}</h4>
+                                                    <span className="font-mono font-bold text-teal-300 text-sm ml-2">{formatDuration(entry.hours)}h</span>
+                                                </div>
+                                                <div className="text-xs text-white/40 flex flex-wrap gap-2 mb-1">
+                                                    <span>{new Date(entry.date).toLocaleDateString()}</span>
+                                                    {entry.start_time && <span>• {entry.start_time} - {entry.end_time}</span>}
+                                                    {entry.order_number && <span className="text-white/30">• #{entry.order_number}</span>}
+                                                </div>
+                                                {entry.note && <p className="text-sm text-white/60 italic truncate">"{entry.note}"</p>}
+
+                                                {/* Entry Actions */}
+                                                <div className="mt-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleEditEntry(entry)}
+                                                        className="px-2 py-1 rounded bg-blue-500/20 text-blue-300 text-[10px] font-bold hover:bg-blue-500/30"
+                                                    >
+                                                        EDIT
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDeleteEntry(entry.id)}
+                                                        className="px-2 py-1 rounded bg-red-500/20 text-red-300 text-[10px] font-bold hover:bg-red-500/30"
+                                                    >
+                                                        LÖSCHEN
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </GlassCard>
+                                );
+                            })
+                        ) : (
+                            <div className="text-center py-10 text-white/20 text-sm">Keine Einträge gefunden</div>
                         )}
-                    </GlassCard>
+                    </div>
                 </div>
             </div>
+
 
             {/* Quota Notification Modal */}
             {

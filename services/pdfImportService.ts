@@ -66,8 +66,17 @@ export const analyzeMontagebericht = async (file: File): Promise<PdfAnalysisResu
         // 3. Daten Zeilenbasiert suchen
 
         // Auftragsnummer
-        const orderMatch = fullText.match(/(\d{8})M26/);
-        const orderNumber = orderMatch ? orderMatch[1] : '';
+        // Priorität 1: Suche nach Label "Auftragsnummer:" (Robust für Wartungsanlagen: 20251811W... -> 20251811)
+        let orderNumber = '';
+        const auftragsnummerMatch = fullText.match(/Auftragsnummer:?\s*(\d{8})/i);
+
+        if (auftragsnummerMatch) {
+            orderNumber = auftragsnummerMatch[1];
+        } else {
+            // Fallback: Alte Logik (M26 Suffix)
+            const orderMatchLegacy = fullText.match(/(\d{8})M26/);
+            orderNumber = orderMatchLegacy ? orderMatchLegacy[1] : '';
+        }
 
         // Kunde: Suche nach "Rechnungsanschrift:", dann nimm die nächsten Zeilen
         // Wir suchen den Index der Zeile mit "Rechnungsanschrift:"
@@ -82,12 +91,12 @@ export const analyzeMontagebericht = async (file: File): Promise<PdfAnalysisResu
             const line2 = lines[rechnungLineIdx + 2].text; // z.B. "Grethlein"
 
             // Wenn Zeile 1 nur Anrede ist, nehmen wir Zeile 2 als Namen
-            if (line1.match(/^(Frau|Herr|Herrn|Firma)$/i)) {
+            if (line1.match(/^(Frau|Herr|Herrn|Firma|Familie)$/i)) {
                 customerName = line2;
             } else {
                 // Falls Anrede + Name in einer Zeile (eher bei Firmen), nehmen wir Zeile 1
                 // Aber entfernen Anrede
-                customerName = line1.replace(/^(Frau|Herr|Herrn|Firma)\s+/i, '');
+                customerName = line1.replace(/^(Frau|Herr|Herrn|Firma|Familie)\s+/i, '');
             }
         }
 

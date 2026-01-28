@@ -1,36 +1,68 @@
 import React, { ReactNode } from 'react';
 
-
 interface GlassLayoutProps {
   children: ReactNode;
 }
 
 const GlassLayout: React.FC<GlassLayoutProps> = ({ children }) => {
   return (
-    <div className="min-h-screen w-full relative bg-gray-900 text-white overflow-hidden selection:bg-teal-500/30 flex flex-col">
+    <div className="min-h-screen w-full relative bg-slate-950 text-slate-100 overflow-hidden selection:bg-teal-500/30 font-sans flex flex-col">
       <style>{`
-        @keyframes pulse-slow {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
+        /* Dynamic Mesh Gradient Animation */
+        @keyframes float {
+          0% { transform: translate(0px, 0px) scale(1); }
+          33% { transform: translate(30px, -50px) scale(1.1); }
+          66% { transform: translate(-20px, 20px) scale(0.9); }
+          100% { transform: translate(0px, 0px) scale(1); }
         }
-        .animate-pulse-slow {
-          animation: pulse-slow 8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        
+        .mesh-blob {
+          animation: float 20s ease-in-out infinite;
+          opacity: 0.6;
+        }
+
+        .mesh-blob-delay-1 { animation-delay: -5s; }
+        .mesh-blob-delay-2 { animation-delay: -12s; }
+
+        /* Custom Scrollbar for the main content area */
+        .glass-scrollbar::-webkit-scrollbar {
+          width: 5px;
+        }
+        .glass-scrollbar::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.02);
+        }
+        .glass-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 10px;
+        }
+        .glass-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.2);
         }
       `}</style>
 
-      {/* Dynamic Background Gradient Blobs */}
-      <div className="fixed top-[-10%] left-[-10%] w-[50%] h-[50%] bg-emerald-600/40 rounded-full blur-[120px] animate-pulse-slow pointer-events-none" />
-      <div className="fixed bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-teal-600/40 rounded-full blur-[120px] animate-pulse-slow pointer-events-none" style={{ animationDelay: '2s' }} />
-      <div className="fixed top-[20%] right-[20%] w-[40%] h-[40%] bg-cyan-600/30 rounded-full blur-[100px] animate-pulse-slow pointer-events-none" style={{ animationDelay: '4s' }} />
+      {/* Modern Mesh Gradient Background */}
+      <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+          {/* Deep Base Gradient */}
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black" />
+          
+          {/* Vibrant Orbs */}
+          {/* Top Right - Cyan/Teal */}
+          <div className="mesh-blob absolute -top-[10%] -right-[10%] w-[50vw] h-[50vw] bg-teal-500/20 rounded-full blur-[100px] mix-blend-screen" />
+          
+          {/* Bottom Left - Emerald/Green */}
+          <div className="mesh-blob mesh-blob-delay-1 absolute -bottom-[10%] -left-[10%] w-[60vw] h-[60vw] bg-emerald-600/20 rounded-full blur-[120px] mix-blend-screen" />
+          
+          {/* Center/Top - Blue/Purple Accent for depth */}
+          <div className="mesh-blob mesh-blob-delay-2 absolute top-[20%] left-[20%] w-[40vw] h-[40vw] bg-blue-600/10 rounded-full blur-[100px] mix-blend-screen" />
+      </div>
 
-
-
-      {/* Main Content Container 
-          REMOVED: transition-all duration-300 to fix fixed positioning context bugs on mobile
-      */}
+      {/* Main Content Container */}
       <SidebarAwareContainer>
-        <div className="w-full md:max-w-7xl mx-auto h-full flex flex-col relative">
-          {children}
+        <div className="relative z-10 w-full h-full flex flex-col pointer-events-auto">
+          {/* Max width container for large screens to prevent stretching */}
+          <div className="w-full h-full mx-auto md:max-w-7xl px-0 md:px-4 lg:px-8 flex-1 flex flex-col">
+             {children}
+          </div>
         </div>
       </SidebarAwareContainer>
     </div>

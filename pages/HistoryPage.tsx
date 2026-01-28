@@ -23,6 +23,7 @@ const HistoryPage: React.FC = () => {
     const [startDate, setStartDate] = useState(getLocalISOString());
     const [endDate, setEndDate] = useState(getLocalISOString());
     const [activePdfDatePicker, setActivePdfDatePicker] = useState<'start' | 'end' | null>(null);
+    const [submitAll, setSubmitAll] = useState(false);
 
     const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
     const [editForm, setEditForm] = useState<{
@@ -385,31 +386,47 @@ const HistoryPage: React.FC = () => {
     };
 
     const handleMarkSubmittedOnly = async () => {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        start.setHours(0, 0, 0, 0);
-        end.setHours(23, 59, 59, 999);
+        let entriesToProcess = entries;
+        let startMoment: number | null = null;
+        let endMoment: number | null = null;
 
-        const filteredEntries = entries.filter(e => {
-            const d = new Date(e.date);
-            return d >= start && d <= end;
-        });
+        if (!submitAll) {
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            start.setHours(0, 0, 0, 0);
+            end.setHours(23, 59, 59, 999);
+            startMoment = start.getTime();
+            endMoment = end.getTime();
 
-        if (filteredEntries.length === 0) {
-            alert("Keine Einträge im gewählten Zeitraum.");
-            return;
+            entriesToProcess = entries.filter(e => {
+                const d = new Date(e.date).getTime();
+                return d >= startMoment! && d <= endMoment!;
+            });
+
+            if (entriesToProcess.length === 0) {
+                alert("Keine Einträge im gewählten Zeitraum.");
+                return;
+            }
+        } else {
+            // "Alle Einträge" Logic: We take everything that is NOT submitted yet
+            entriesToProcess = entries.filter(e => !e.submitted);
+            if (entriesToProcess.length === 0) {
+                alert("Keine offenen Einträge gefunden.");
+                return;
+            }
         }
 
-        // Check if there are rejected or pending items that would be blocked
-        const blockedCount = filteredEntries.filter(e => !e.isAbsence && (e.rejected_at || e.responsible_user_id)).length;
+        // Check for blocked entries (rejected/pending)
+        // For "Submit All", we might want to skip them silently or warn.
+        // Let's warn to be safe, consistent with range behavior.
+        const blockedCount = entriesToProcess.filter(e => !e.isAbsence && (e.rejected_at || e.responsible_user_id)).length;
         if (blockedCount > 0) {
             alert(`${blockedCount} Einträge sind abgelehnt oder noch in Prüfung und werden NICHT als abgegeben markiert.`);
         }
 
-        const idsToMark = filteredEntries
+        const idsToMark = entriesToProcess
             .filter(e => !e.isAbsence && !e.id.startsWith('virtual-'))
-            // NEU: Nur EInträge markieren, die NICHT abgelehnt sind und NICHT in Prüfung sind
-            .filter(e => !e.rejected_at && !e.responsible_user_id)
+            .filter(e => !e.rejected_at && !e.responsible_user_id && !e.submitted) // Ensure we don't re-submit
             .map(e => e.id);
 
         if (idsToMark.length > 0) {
@@ -417,10 +434,26 @@ const HistoryPage: React.FC = () => {
         }
 
         // Handle Absences
-        const absenceIds = filteredEntries
-            .filter(e => e.isAbsence && e.id.startsWith('abs-'))
-            .map(e => e.id.split('-')[1])
-            .filter((value, index, self) => self.indexOf(value) === index);
+        // Absences normally don't need 'submission' in the same way, but we have a 'submitted' flag on them too in the local mapped View model?
+        // Let's see... mapped absences have 'submitted' prop from DB.
+        // We need to filter absences from the same range or all if submitAll is true.
+
+        let absenceIds: string[] = [];
+
+        if (submitAll) {
+            // We need to find all UNsubmitted absences from the source absences list, not just the mapped ones
+            // But 'entries' contains mapped absences.
+            absenceIds = entriesToProcess
+                .filter(e => e.isAbsence && e.id.startsWith('abs-') && !e.submitted)
+                .map(e => e.id.split('-')[1])
+                .filter((value, index, self) => self.indexOf(value) === index);
+
+        } else {
+            absenceIds = entriesToProcess
+                .filter(e => e.isAbsence && e.id.startsWith('abs-') && !e.submitted)
+                .map(e => e.id.split('-')[1])
+                .filter((value, index, self) => self.indexOf(value) === index);
+        }
 
         if (absenceIds.length > 0) {
             const { error } = await supabase
@@ -1034,13 +1067,34 @@ const HistoryPage: React.FC = () => {
                             <button onClick={() => setShowPdfModal(false)} className="absolute top-4 right-4 text-white/50 hover:text-white"><X size={20} /></button>
                             <div className="flex items-center gap-3 text-teal-300 mb-6"><FileDown size={24} /><h3 className="text-xl font-bold">PDF Exportieren</h3></div>
                             <div className="space-y-4">
-                                <div>
-                                    <label className="text-xs uppercase font-bold text-white/50 mb-1 block">Von Datum</label>
-                                    <div onClick={() => setActivePdfDatePicker('start')} className="flex items-center justify-between w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white cursor-pointer hover:bg-white/10"><span>{formatDateDisplay(startDate)}</span><Calendar size={18} className="text-white/50" /></div>
+
+                                {/* TOGGLE SWITCH FOR ALL ENTRIES */}
+                                <div className="flex items-center justify-between bg-white/5 p-3 rounded-lg border border-white/10">
+                                    <div className="flex flex-col">
+                                        <span className="text-sm font-bold text-white">Alle Einträge abgeben</span>
+                                        <span className="text-[10px] text-white/50">Ignoriert Datumsbereich</span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSubmitAll(!submitAll)}
+                                        className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 ease-in-out relative ${submitAll ? 'bg-teal-500' : 'bg-white/10'}`}
+                                    >
+                                        <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${submitAll ? 'translate-x-6' : 'translate-x-0'}`} />
+                                    </button>
                                 </div>
-                                <div>
-                                    <label className="text-xs uppercase font-bold text-white/50 mb-1 block">Bis Datum</label>
-                                    <div onClick={() => setActivePdfDatePicker('end')} className="flex items-center justify-between w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white cursor-pointer hover:bg-white/10"><span>{formatDateDisplay(endDate)}</span><Calendar size={18} className="text-white/50" /></div>
+
+                                <div className={`grid transition-all duration-300 ease-in-out ${submitAll ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100'}`}>
+                                    <div className="overflow-hidden space-y-4">
+                                        <hr className="border-white/10 my-2" />
+                                        <div>
+                                            <label className="text-xs uppercase font-bold text-white/50 mb-1 block">Von Datum</label>
+                                            <div onClick={() => setActivePdfDatePicker('start')} className="flex items-center justify-between w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white cursor-pointer hover:bg-white/10"><span>{formatDateDisplay(startDate)}</span><Calendar size={18} className="text-white/50" /></div>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs uppercase font-bold text-white/50 mb-1 block">Bis Datum</label>
+                                            <div onClick={() => setActivePdfDatePicker('end')} className="flex items-center justify-between w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white cursor-pointer hover:bg-white/10"><span>{formatDateDisplay(endDate)}</span><Calendar size={18} className="text-white/50" /></div>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div className="bg-white/5 rounded-lg p-3 space-y-3">
                                     <button onClick={generateProjectPDF} className="w-full flex items-center gap-3 p-3 rounded-lg bg-teal-600/20 border border-teal-500/30 hover:bg-teal-600/40 group"><FileText className="text-teal-300" size={20} /><div className="text-left"><div className="text-sm font-bold text-teal-100">Projekte Exportieren</div><div className="text-[10px] text-teal-200/60">Querformat • Mit Start/Ende</div><div className="text-[10px] text-emerald-300 mt-0.5">Markiert Einträge als abgegeben</div></div></button>
