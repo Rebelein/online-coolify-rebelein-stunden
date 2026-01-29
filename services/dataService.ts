@@ -977,6 +977,16 @@ export const useAbsences = (customUserId?: string) => {
 
     let query = supabase.from('user_absences').select('*').order('start_date');
 
+    // Filter out deleted items (soft delete)
+    // We want items where is_deleted is false or null. 
+    // Supabase .is('is_deleted', null) or .eq('is_deleted', false) combined?
+    // Easiest is .not('is_deleted', 'is', true) if boolean, but 'is' usually used for null.
+    // Let's use logic: (is_deleted IS NULL OR is_deleted = false)
+    // Supabase modifier for OR filter on same column is tricky in chain.
+    // But since default is false, we can ensure column has default false in DB?
+    // Migration added default false. So we can just check eq false.
+    query = query.eq('is_deleted', false);
+
     if (customUserId) {
       query = query.eq('user_id', customUserId);
     } else if (user) {
@@ -1016,9 +1026,71 @@ export const useAbsences = (customUserId?: string) => {
     if (error) alert("Fehler beim Speichern der Abwesenheit: " + (error.message || JSON.stringify(error)));
   };
 
-  const deleteAbsence = async (id: string) => {
-    const { error } = await supabase.from('user_absences').delete().eq('id', id);
-    if (error) alert("Fehler beim Löschen: " + (error.message || JSON.stringify(error)));
+  const deleteAbsence = async (id: string, reason?: string): Promise<{ success: boolean; message?: string }> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, message: "Nicht eingeloggt" };
+
+    // Fetch existing checks
+    const absence = absences.find(a => a.id === id);
+    if (!absence) return { success: false, message: "Eintrag nicht gefunden" };
+
+    const isOwner = absence.user_id === user.id;
+
+    if (isOwner) {
+      // Owner Deletion
+      const { error } = await supabase.from('user_absences').delete().eq('id', id);
+      if (error) {
+        return { success: false, message: "Fehler beim Löschen: " + (error.message || JSON.stringify(error)) };
+      }
+      return { success: true };
+    } else {
+      // Admin/Office deleting User's Absence
+      if (!reason) {
+        return { success: false, message: "Bitte geben Sie einen Grund für die Löschung an." };
+      }
+      const { error } = await supabase.from('user_absences').update({
+        deletion_requested_at: new Date().toISOString(),
+        deletion_requested_by: user.id,
+        deletion_request_reason: reason
+      }).eq('id', id);
+
+      if (error) {
+        return { success: false, message: "Fehler beim Beantragen der Löschung: " + (error.message || JSON.stringify(error)) };
+      } else {
+        return { success: true, message: "Löschantrag gesendet. Der Mitarbeiter muss zustimmen." };
+      }
+    }
+  };
+
+  const confirmAbsenceDeletion = async (id: string): Promise<{ success: boolean; message?: string }> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, message: "Nicht eingeloggt" };
+
+    const { error } = await supabase.from('user_absences').update({
+      is_deleted: true,
+      deleted_at: new Date().toISOString(),
+      deleted_by: user.id, // Confirmed by user
+      deletion_confirmed_by_user: true
+    }).eq('id', id);
+
+    if (error) return { success: false, message: "Fehler beim Bestätigen: " + error.message };
+
+    await fetchAbsences();
+    return { success: true };
+  };
+
+  const rejectAbsenceDeletion = async (id: string): Promise<{ success: boolean; message?: string }> => {
+    // Clear request flags
+    const { error } = await supabase.from('user_absences').update({
+      deletion_requested_at: null,
+      deletion_requested_by: null,
+      deletion_request_reason: null
+    }).eq('id', id);
+
+    if (error) return { success: false, message: "Fehler beim Ablehnen: " + error.message };
+
+    await fetchAbsences();
+    return { success: true };
   };
 
   const deleteAbsenceDay = async (dateStr: string, type: string) => {
@@ -1071,7 +1143,7 @@ export const useAbsences = (customUserId?: string) => {
     }
   };
 
-  return { absences, addAbsence, deleteAbsence, deleteAbsenceDay, loading, fetchAbsences };
+  return { absences, addAbsence, deleteAbsence, deleteAbsenceDay, confirmAbsenceDeletion, rejectAbsenceDeletion, loading, fetchAbsences };
 };
 
 export const useVacationRequests = (customUserId?: string) => {

@@ -907,76 +907,96 @@ const AnalysisPage: React.FC = () => {
                                             {new Date(req.start_date).toLocaleDateString('de-DE')} - {new Date(req.end_date).toLocaleDateString('de-DE')}
                                         </div>
                                         <div className="flex items-center gap-2 mt-1">
-                                            {req.status === 'approved' && <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1"><CheckCircle size={10} /> Genehmigt</span>}
-                                            {req.status === 'pending' && <span className="text-[10px] bg-orange-500/20 text-orange-300 px-2 py-0.5 rounded border border-orange-500/30 flex items-center gap-1"><Clock size={10} /> In Prüfung</span>}
-                                            {req.status === 'rejected' && <span className="text-[10px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded border border-red-500/30 flex items-center gap-1"><X size={10} /> Abgelehnt</span>}
+                                            {(() => {
+                                                const isApproved = req.status === 'approved';
+                                                // Check if absence still exists (if approved)
+                                                // If approved but not in absences list -> Deleted
+                                                const isDeleted = isApproved && !absences.some(a => a.start_date === req.start_date && a.end_date === req.end_date && a.type === 'vacation');
+
+                                                if (isDeleted) {
+                                                    return <span className="text-[10px] bg-red-500/10 text-red-400/70 line-through decoration-red-400/50 px-2 py-0.5 rounded border border-red-500/20 flex items-center gap-1"><X size={10} /> Gelöscht</span>;
+                                                }
+
+                                                if (req.status === 'approved') return <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1"><CheckCircle size={10} /> Genehmigt</span>;
+                                                if (req.status === 'pending') return <span className="text-[10px] bg-orange-500/20 text-orange-300 px-2 py-0.5 rounded border border-orange-500/30 flex items-center gap-1"><Clock size={10} /> In Prüfung</span>;
+                                                if (req.status === 'rejected') return <span className="text-[10px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded border border-red-500/30 flex items-center gap-1"><X size={10} /> Abgelehnt</span>;
+                                            })()}
                                         </div>
                                     </div>
-                                    {req.status === 'pending' && (
-                                        <button onClick={() => deleteRequest(req.id)} className="p-2 bg-white/5 hover:bg-red-500/20 text-white/50 hover:text-red-300 rounded-lg transition-colors">
-                                            <X size={16} />
-                                        </button>
-                                    )}
+                                    {
+                                        req.status === 'pending' && (
+                                            <button onClick={() => deleteRequest(req.id)} className="p-2 bg-white/5 hover:bg-red-500/20 text-white/50 hover:text-red-300 rounded-lg transition-colors">
+                                                <X size={16} />
+                                            </button>
+                                        )
+                                    }
                                 </div>
                             ))}
                         </div>
                     )}
                 </GlassCard>
-            )}
+            )
+            }
 
             {/* REQUEST MODAL */}
-            {showRequestModal && (
-                <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                    <GlassCard className="w-full max-w-sm relative shadow-2xl border-purple-500/30">
-                        <button onClick={() => setShowRequestModal(false)} className="absolute top-4 right-4 text-white/50 hover:text-white"><X size={20} /></button>
-                        <div className="flex items-center gap-3 text-purple-300 mb-6"><Palmtree size={24} /><h3 className="text-xl font-bold">Urlaub beantragen</h3></div>
+            {
+                showRequestModal && (
+                    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                        <GlassCard className="w-full max-w-sm relative shadow-2xl border-purple-500/30">
+                            <button onClick={() => setShowRequestModal(false)} className="absolute top-4 right-4 text-white/50 hover:text-white"><X size={20} /></button>
+                            <div className="flex items-center gap-3 text-purple-300 mb-6"><Palmtree size={24} /><h3 className="text-xl font-bold">Urlaub beantragen</h3></div>
 
-                        <div className="space-y-4">
-                            <div>
-                                <label className="text-xs uppercase font-bold text-white/50 mb-1 block">Erster Urlaubstag</label>
-                                <div onClick={() => setShowStartPicker(true)} className="flex items-center justify-between w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white cursor-pointer hover:bg-white/10">
-                                    <span>{reqStart ? new Date(reqStart).toLocaleDateString('de-DE') : 'Bitte wählen...'}</span>
-                                    <Calendar size={18} className="text-white/50" />
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-xs uppercase font-bold text-white/50 mb-1 block">Erster Urlaubstag</label>
+                                    <div onClick={() => setShowStartPicker(true)} className="flex items-center justify-between w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white cursor-pointer hover:bg-white/10">
+                                        <span>{reqStart ? new Date(reqStart).toLocaleDateString('de-DE') : 'Bitte wählen...'}</span>
+                                        <Calendar size={18} className="text-white/50" />
+                                    </div>
                                 </div>
-                            </div>
-                            <div>
-                                <label className="text-xs uppercase font-bold text-white/50 mb-1 block">Letzter Urlaubstag</label>
-                                <div onClick={() => setShowEndPicker(true)} className="flex items-center justify-between w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white cursor-pointer hover:bg-white/10">
-                                    <span>{reqEnd ? new Date(reqEnd).toLocaleDateString('de-DE') : 'Bitte wählen...'}</span>
-                                    <Calendar size={18} className="text-white/50" />
+                                <div>
+                                    <label className="text-xs uppercase font-bold text-white/50 mb-1 block">Letzter Urlaubstag</label>
+                                    <div onClick={() => setShowEndPicker(true)} className="flex items-center justify-between w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white cursor-pointer hover:bg-white/10">
+                                        <span>{reqEnd ? new Date(reqEnd).toLocaleDateString('de-DE') : 'Bitte wählen...'}</span>
+                                        <Calendar size={18} className="text-white/50" />
+                                    </div>
                                 </div>
+                                <div>
+                                    <label className="text-xs uppercase font-bold text-white/50 mb-1 block">Bemerkung (Optional)</label>
+                                    <GlassInput
+                                        value={reqNote}
+                                        onChange={(e) => setReqNote(e.target.value)}
+                                        placeholder="z.B. Sommerurlaub"
+                                    />
+                                </div>
+                                <GlassButton onClick={handleCreateRequest} className="w-full mt-2 bg-purple-500/20 hover:bg-purple-500/40 border-purple-500/30 text-purple-200">
+                                    Antrag senden
+                                </GlassButton>
                             </div>
-                            <div>
-                                <label className="text-xs uppercase font-bold text-white/50 mb-1 block">Bemerkung (Optional)</label>
-                                <GlassInput
-                                    value={reqNote}
-                                    onChange={(e) => setReqNote(e.target.value)}
-                                    placeholder="z.B. Sommerurlaub"
-                                />
-                            </div>
-                            <GlassButton onClick={handleCreateRequest} className="w-full mt-2 bg-purple-500/20 hover:bg-purple-500/40 border-purple-500/30 text-purple-200">
-                                Antrag senden
-                            </GlassButton>
-                        </div>
-                    </GlassCard>
-                </div>
-            )}
+                        </GlassCard>
+                    </div>
+                )
+            }
 
-            {showStartPicker && (
-                <GlassDatePicker
-                    value={reqStart}
-                    onChange={(d) => { setReqStart(d); if (!reqEnd) setReqEnd(d); setShowStartPicker(false); }}
-                    onClose={() => setShowStartPicker(false)}
-                />
-            )}
-            {showEndPicker && (
-                <GlassDatePicker
-                    value={reqEnd}
-                    onChange={(d) => { setReqEnd(d); setShowEndPicker(false); }}
-                    onClose={() => setShowEndPicker(false)}
-                />
-            )}
-        </div>
+            {
+                showStartPicker && (
+                    <GlassDatePicker
+                        value={reqStart}
+                        onChange={(d) => { setReqStart(d); if (!reqEnd) setReqEnd(d); setShowStartPicker(false); }}
+                        onClose={() => setShowStartPicker(false)}
+                    />
+                )
+            }
+            {
+                showEndPicker && (
+                    <GlassDatePicker
+                        value={reqEnd}
+                        onChange={(d) => { setReqEnd(d); setShowEndPicker(false); }}
+                        onClose={() => setShowEndPicker(false)}
+                    />
+                )
+            }
+        </div >
     );
 };
 

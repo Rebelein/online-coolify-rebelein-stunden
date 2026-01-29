@@ -329,6 +329,16 @@ export const generateProjectPdfBlob = (data: ExportData, startDate: string, endD
         doc.text(formattedDate, offsetX + halfWidth - marginX, startY, { align: 'right' });
 
         const tableData = dayEntries.map(e => {
+            // NEU: Automatische Pausen schön darstellen
+            if (e.type === 'break' && !e.start_time && !e.end_time) {
+                return [
+                    'nach',         // Spalte Von
+                    '6 Std',        // Spalte Bis
+                    'Pause',        // Spalte Tätigkeit
+                    ''              // Spalte Std (leer lassen)
+                ];
+            }
+
             let durationMin = calculateDurationInMinutes(e.start_time || '', e.end_time || '', 0);
 
             // Deduct Overlaps with BREAKS
@@ -538,7 +548,10 @@ export const generateAttendancePdfBlob = (data: ExportData, startDate: string, e
         }
 
         if (dayBreaks.length > 0) {
-            const breakTimes = dayBreaks.map((e: any) => e.start_time && e.end_time ? `${e.start_time}-${e.end_time}` : `${e.hours}h`).join(', ');
+            const breakTimes = dayBreaks.map((e: any) => {
+                if (e.type === 'break' && !e.start_time && !e.end_time) return 'Pauschal'; // Statt "0h"
+                return e.start_time && e.end_time ? `${e.start_time}-${e.end_time}` : `${e.hours}h`;
+            }).join(', ');
             pauseStr = pauseStr ? `${pauseStr}, ${breakTimes}` : breakTimes;
         }
 
@@ -866,6 +879,17 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
             let label = item.client_name;
             let hoursStr = '-';
             let durationMin = 0;
+
+            // NEU: Automatische Pausen abfangen
+            if (item.type === 'break' && !item.start_time && !item.end_time) {
+                tableBody.push([
+                    'nach 6 Std', // Spalte Zeit
+                    { content: 'Pause' }, // Spalte Projekt
+                    { content: '-', styles: { halign: 'right', textColor: [150, 150, 150] } }, // Spalte Std
+                    '' // Notiz (leer)
+                ]);
+                return; // WICHTIG: Den Rest der Schleife für diesen Eintrag überspringen
+            }
 
             if (isBreak) {
                 // Calculate break duration

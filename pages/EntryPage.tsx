@@ -5,7 +5,7 @@ import { supabase } from '../services/supabaseClient'; // Ensure supabase is imp
 import { GlassCard, GlassInput, GlassButton } from '../components/GlassCard';
 import GlassDatePicker from '../components/GlassDatePicker';
 import { PlusCircle, Save, X, Calendar, ChevronLeft, ChevronRight, Clock, Coffee, Building, Briefcase, Truck, Sun, Heart, AlertCircle, AlertTriangle, CheckCircle, Info, Lock, History, User, FileText, Palmtree, UserX, Copy, Loader2, RefreshCw, Send, ArrowLeft, Trash2, CalendarDays, Plus, ChevronDown, ChevronUp, ArrowRight, MessageSquareText, StickyNote, Building2, Warehouse, Car, Stethoscope, PartyPopper, Ban, TrendingDown, Play, Square, UserCheck, Check, UserPlus, ArrowLeftRight, Baby, Coins, PiggyBank, Siren, Percent, ShieldAlert, Edit2, XCircle, Hash, Users } from 'lucide-react';
-import { TimeSegment, QuotaChangeNotification, TimeEntry } from '../types';
+import { TimeSegment, QuotaChangeNotification, TimeEntry, UserAbsence } from '../types';
 import { formatDuration, getGracePeriodDate, formatMinutesToDecimal } from '../services/utils/timeUtils';
 import { analyzeMontagebericht, uploadBackupFile } from '../services/pdfImportService';
 
@@ -85,7 +85,7 @@ const DebouncedSegmentNote: React.FC<{
 
 const EntryPage: React.FC = () => {
     const { addEntry, entries, updateEntry } = useTimeEntries();
-    const { addAbsence } = useAbsences();
+    const { addAbsence, absences, confirmAbsenceDeletion, rejectAbsenceDeletion } = useAbsences();
     const { settings, updateSettings } = useSettings();
     const { getLogForDate, saveDailyLog } = useDailyLogs();
 
@@ -148,6 +148,15 @@ const EntryPage: React.FC = () => {
 
     // NEU: Order Number State
     const [orderNumber, setOrderNumber] = useState('');
+
+    // Absence Deletion Notifications
+    const [absenceNotifications, setAbsenceNotifications] = useState<UserAbsence[]>([]);
+
+    useEffect(() => {
+        if (!absences) return;
+        const pending = absences.filter(a => a.deletion_requested_at && !a.deletion_confirmed_by_user && !a.is_deleted);
+        setAbsenceNotifications(pending);
+    }, [absences]);
     const [showOrderInput, setShowOrderInput] = useState(false);
 
     // NEU: Success Modal State
@@ -212,6 +221,30 @@ const EntryPage: React.FC = () => {
             if (fileInputRef.current) fileInputRef.current.value = '';
         }
     };
+
+    // --- ABSENCE REQUEST HANDLERS ---
+    const handleConfirmAbsenceDeletion = async (id: string) => {
+        const res = await confirmAbsenceDeletion(id);
+        if (res.success) {
+            setAnalysisMsg("✅ Löschung bestätigt");
+            setTimeout(() => setAnalysisMsg(null), 3000);
+        } else {
+            setAnalysisMsg("❌ " + (res.message || "Fehler"));
+            setTimeout(() => setAnalysisMsg(null), 5000);
+        }
+    };
+
+    const handleRejectAbsenceDeletion = async (id: string) => {
+        const res = await rejectAbsenceDeletion(id);
+        if (res.success) {
+            setAnalysisMsg("✅ Löschung abgelehnt (Eintrag behalten)");
+            setTimeout(() => setAnalysisMsg(null), 3000);
+        } else {
+            setAnalysisMsg("❌ " + (res.message || "Fehler"));
+            setTimeout(() => setAnalysisMsg(null), 5000);
+        }
+    };
+
 
     // --- SHARE TARGET HANDLING START ---
     useEffect(() => {
@@ -1093,6 +1126,41 @@ const EntryPage: React.FC = () => {
             }
         }
 
+        // --- AUTOMATISCHE PAUSEN-REGEL (> 6 Stunden) ---
+        // Prüfen, ob es ein Arbeitseintrag ist und keine Abwesenheit
+        const isAbsenceType = ['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay', 'overtime_reduction'].includes(entryType);
+
+        if (entryType === 'work' && !isAbsence && !isAbsenceType) {
+            // 1. Berechne aktuelle Tages-Summe (ohne den gerade bearbeiteten Eintrag, falls Edit)
+            const currentWorkEntries = entries.filter(e =>
+                e.date === date &&
+                e.type === 'work' &&
+                !e.is_deleted &&
+                e.id !== editingEntryId // Bei Edit den alten Wert ignorieren
+            );
+
+            const currentSum = currentWorkEntries.reduce((sum, e) => sum + (e.hours || 0), 0);
+            const newHours = parseFloat(hours.replace(',', '.'));
+            const totalHoursDaily = currentSum + newHours;
+
+            // 2. Prüfen, ob schon IRGENDEINE Pause existiert
+            const hasBreak = entries.some(e => e.date === date && e.type === 'break' && !e.is_deleted);
+
+            // 3. Wenn > 6h und noch keine Pause -> Dummy anlegen
+            if (totalHoursDaily > 6 && !hasBreak) {
+                await addEntry({
+                    date: date,
+                    client_name: 'Pflichtpause (Auto)', // Erkennungs-Name
+                    type: 'break',
+                    hours: 0,           // 0 Stunden = Keine Berechnung
+                    start_time: '',     // Leer lassen -> Keine Überlappungs-Konflikte
+                    end_time: '',       // Leer lassen
+                    note: 'Automatisch generiert (> 6 Std Regel)',
+                    submitted: false
+                });
+            }
+        }
+
         finishSubmit();
     };
 
@@ -1299,6 +1367,165 @@ const EntryPage: React.FC = () => {
                     </div>
                 )}
 
+                {/* --- NEU: ABWESENHEITSLÖSCHUNGEN BESTÄTIGEN --- */}
+                {absenceNotifications.length > 0 && (
+                    <div className="mb-8 animate-in slide-in-from-top-4">
+                        <div className="flex items-center gap-2 mb-3 px-1">
+                            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                            <h3 className="text-xs font-bold text-red-300 uppercase tracking-wider">Löschanträge Abwesenheit ({absenceNotifications.length})</h3>
+                        </div>
+                        <div className="grid gap-3">
+                            {absenceNotifications.map(absence => (
+                                <GlassCard key={absence.id} className="!p-4 border-red-500/30 bg-red-900/5 hover:bg-red-900/10">
+                                    <div className="flex justify-between items-start gap-4">
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <span className="text-xs font-bold text-red-400 uppercase tracking-wider">
+                                                    {absence.type === 'vacation' ? 'Urlaub' :
+                                                        absence.type === 'sick' ? 'Krank' :
+                                                            absence.type === 'holiday' ? 'Feiertag' :
+                                                                absence.type === 'unpaid' ? 'Unbezahlt' : absence.type}
+                                                </span>
+                                                <span className="text-white/30 text-xs">•</span>
+                                                <span className="text-white/50 text-xs font-mono">
+                                                    {new Date(absence.start_date).toLocaleDateString('de-DE')}
+                                                    {absence.start_date !== absence.end_date && ` - ${new Date(absence.end_date).toLocaleDateString('de-DE')}`}
+                                                </span>
+                                            </div>
+                                            <div className="text-white font-bold text-sm">
+                                                Löschung beantragt
+                                            </div>
+                                            {absence.deletion_request_reason && (
+                                                <div className="mt-2 text-red-200/70 text-sm italic bg-red-500/10 p-2 rounded-lg border border-red-500/10">
+                                                    "{absence.deletion_request_reason}"
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex flex-col gap-2 shrink-0">
+                                            <button
+                                                onClick={() => handleConfirmAbsenceDeletion(absence.id)}
+                                                className="p-2 bg-emerald-500/20 text-emerald-300 rounded-xl hover:bg-emerald-500/30 font-bold text-xs flex items-center justify-center gap-1 min-w-[32px]"
+                                                title="Löschung zustimmen"
+                                            >
+                                                <Check size={18} />
+                                            </button>
+                                            <button
+                                                onClick={() => handleRejectAbsenceDeletion(absence.id)}
+                                                className="p-2 bg-white/10 text-white/50 rounded-xl hover:bg-white/20 font-bold text-xs flex items-center justify-center gap-1 min-w-[32px]"
+                                                title="Löschung ablehnen (Behalten)"
+                                            >
+                                                <X size={18} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </GlassCard>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* --- NEU: MITARBEITER-BESTÄTIGUNGEN (PEER REVIEW) --- */}
+                {pendingReviews.length > 0 && (
+                    <div className="mb-8 animate-in slide-in-from-top-4">
+                        <div className="flex items-center gap-2 mb-3 px-1">
+                            <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse"></span>
+                            <h3 className="text-xs font-bold text-teal-300 uppercase tracking-wider">Mitarbeiter-Bestätigungen ({pendingReviews.length})</h3>
+                        </div>
+                        <div className="grid gap-3">
+                            {pendingReviews.map(review => {
+                                const creatorName = installers.find(i => i.user_id === review.user_id)?.display_name || 'Unbekannt';
+                                return (
+                                    <GlassCard key={review.id} className="!p-4 border-teal-500/30 bg-teal-900/5 hover:bg-teal-900/10">
+                                        <div className="flex justify-between items-start gap-4">
+                                            <div className="flex-1">
+                                                <div className="flex justify-between items-center mb-1">
+                                                    <div className="text-xs font-bold text-teal-400 uppercase tracking-wider">{creatorName}</div>
+                                                    <div className="px-2 py-0.5 rounded bg-teal-500/20 text-teal-300 text-xs font-mono font-bold">{formatDuration(review.hours)}h</div>
+                                                </div>
+                                                <div className="font-bold text-white text-sm mb-1">{review.client_name}</div>
+                                                <div className="text-white/50 text-xs flex flex-wrap gap-2">
+                                                    <span>{new Date(review.date).toLocaleDateString()}</span>
+                                                    {review.start_time && <span>• {review.start_time} - {review.end_time}</span>}
+                                                </div>
+                                                {review.note && <div className="mt-2 text-white/70 text-sm italic">"{review.note}"</div>}
+                                            </div>
+                                            <div className="flex flex-col gap-2 shrink-0">
+                                                <button
+                                                    onClick={() => processReview(review.id, 'confirm')}
+                                                    className="p-2 bg-emerald-500/20 text-emerald-300 rounded-xl hover:bg-emerald-500/30"
+                                                    title="Bestätigen"
+                                                >
+                                                    <Check size={18} />
+                                                </button>
+                                                {/* Ablehnen Button löst Prompt aus oder direkt Reject? Logic in dataService nutzt Prompt nicht direkt, aber wir können rejectionReason State nutzen wenn gewollt. Vorerst simple, oder einfach Prompt. */}
+                                                <button
+                                                    onClick={() => {
+                                                        const reason = prompt("Grund für Ablehnung:");
+                                                        if (reason) processReview(review.id, 'reject', reason);
+                                                    }}
+                                                    className="p-2 bg-red-500/20 text-red-300 rounded-xl hover:bg-red-500/30"
+                                                    title="Ablehnen"
+                                                >
+                                                    <X size={18} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </GlassCard>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
+                {/* --- NEU: BENACHRICHTIGUNGEN (LÖSCHUNGEN / ÄNDERUNGEN) --- */}
+                {entryNotifications.length > 0 && (
+                    <div className="mb-8 animate-in slide-in-from-top-4">
+                        <div className="flex items-center gap-2 mb-3 px-1">
+                            <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></span>
+                            <h3 className="text-xs font-bold text-orange-300 uppercase tracking-wider">Bestätigungen erforderlich ({entryNotifications.length})</h3>
+                        </div>
+                        <div className="grid gap-3">
+                            {entryNotifications.map(notif => {
+                                const isDeletion = notif.is_deleted || notif.deletion_requested_at;
+                                const isChange = !isDeletion;
+                                const changerName = notif.last_changed_by ? (installers.find(i => i.user_id === notif.last_changed_by)?.display_name || 'Büro') : 'Büro';
+
+                                return (
+                                    <GlassCard key={notif.id} className="!p-4 border-orange-500/30 bg-orange-900/5 hover:bg-orange-900/10">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <span className="text-xs font-bold text-white/50">{new Date(notif.date).toLocaleDateString()}</span>
+                                            <span className="bg-orange-500/20 text-orange-200 text-[10px] px-2 py-0.5 rounded uppercase font-bold">
+                                                {isDeletion ? 'Löschung' : 'Änderung'}
+                                            </span>
+                                        </div>
+                                        <div className="text-sm text-white/80 mb-4">
+                                            {isDeletion ? (
+                                                <>
+                                                    <p className="font-bold text-red-300">Löschung beantragt</p>
+                                                    <p className="text-xs mt-1">Grund: "{notif.deletion_request_reason || notif.deletion_reason || 'Kein Grund'}"</p>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <p>Änderung durch <span className="text-orange-300 font-bold">{changerName}</span></p>
+                                                    <p className="text-xs mt-1 italic">"{notif.change_reason || 'Kein Grund'}"</p>
+                                                </>
+                                            )}
+                                        </div>
+                                        <div className="flex justify-end gap-2">
+                                            <button
+                                                onClick={() => confirmEntryNotification(notif)}
+                                                className="bg-orange-500 hover:bg-orange-400 text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                                            >
+                                                <CheckCircle size={14} /> Akzeptieren
+                                            </button>
+                                        </div>
+                                    </GlassCard>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
                 {/* DEACTIVATED ACCOUNT */}
                 {settings?.is_active === false && (
                     <GlassCard className="mb-6 !border-red-500/30 !bg-red-900/10">
@@ -1363,7 +1590,7 @@ const EntryPage: React.FC = () => {
                     }}
                     className={`grid gap-6 w-full ${settings?.is_active === false ? 'opacity-50 pointer-events-none grayscale' : ''}`}
                 >
-                    <GlassCard className={`!p-3 space-y-3 transition-all duration-300 relative z-20 ${getTypeColor()}`}>
+                    <GlassCard className={`!p-3 space-y-3 transition-all duration-300 relative z-20 !overflow-visible ${getTypeColor()}`}>
                         {/* LATE ENTRY WARNING & REASON */}
                         {isLateEntry && (
                             <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-3 mb-2 animate-in slide-in-from-top-2">

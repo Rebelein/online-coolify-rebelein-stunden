@@ -9,20 +9,15 @@ const GlassLayout: React.FC<GlassLayoutProps> = ({ children }) => {
     <div className="min-h-screen w-full relative bg-slate-950 text-slate-100 overflow-hidden selection:bg-teal-500/30 font-sans flex flex-col">
       <style>{`
         /* Dynamic Mesh Gradient Animation */
-        @keyframes float {
-          0% { transform: translate(0px, 0px) scale(1); }
-          33% { transform: translate(30px, -50px) scale(1.1); }
-          66% { transform: translate(-20px, 20px) scale(0.9); }
-          100% { transform: translate(0px, 0px) scale(1); }
-        }
+        /* Dynamic Mesh Gradient Animation REMOVED for Performance */
         
         .mesh-blob {
-          animation: float 20s ease-in-out infinite;
+          /* animation: float 20s ease-in-out infinite; */
           opacity: 0.6;
         }
 
-        .mesh-blob-delay-1 { animation-delay: -5s; }
-        .mesh-blob-delay-2 { animation-delay: -12s; }
+        /* .mesh-blob-delay-1 { animation-delay: -5s; } */
+        /* .mesh-blob-delay-2 { animation-delay: -12s; } */
 
         /* Custom Scrollbar for the main content area */
         .glass-scrollbar::-webkit-scrollbar {
@@ -42,18 +37,18 @@ const GlassLayout: React.FC<GlassLayoutProps> = ({ children }) => {
 
       {/* Modern Mesh Gradient Background */}
       <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
-          {/* Deep Base Gradient */}
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black" />
-          
-          {/* Vibrant Orbs */}
-          {/* Top Right - Cyan/Teal */}
-          <div className="mesh-blob absolute -top-[10%] -right-[10%] w-[50vw] h-[50vw] bg-teal-500/20 rounded-full blur-[100px] mix-blend-screen" />
-          
-          {/* Bottom Left - Emerald/Green */}
-          <div className="mesh-blob mesh-blob-delay-1 absolute -bottom-[10%] -left-[10%] w-[60vw] h-[60vw] bg-emerald-600/20 rounded-full blur-[120px] mix-blend-screen" />
-          
-          {/* Center/Top - Blue/Purple Accent for depth */}
-          <div className="mesh-blob mesh-blob-delay-2 absolute top-[20%] left-[20%] w-[40vw] h-[40vw] bg-blue-600/10 rounded-full blur-[100px] mix-blend-screen" />
+        {/* Deep Base Gradient */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black" />
+
+        {/* Vibrant Orbs */}
+        {/* Top Right - Cyan/Teal */}
+        <div className="mesh-blob absolute -top-[10%] -right-[10%] w-[50vw] h-[50vw] bg-teal-500/20 rounded-full blur-[100px] mix-blend-screen" />
+
+        {/* Bottom Left - Emerald/Green */}
+        <div className="mesh-blob mesh-blob-delay-1 absolute -bottom-[10%] -left-[10%] w-[60vw] h-[60vw] bg-emerald-600/20 rounded-full blur-[120px] mix-blend-screen" />
+
+        {/* Center/Top - Blue/Purple Accent for depth */}
+        <div className="mesh-blob mesh-blob-delay-2 absolute top-[20%] left-[20%] w-[40vw] h-[40vw] bg-blue-600/10 rounded-full blur-[100px] mix-blend-screen" />
       </div>
 
       {/* Main Content Container */}
@@ -61,7 +56,7 @@ const GlassLayout: React.FC<GlassLayoutProps> = ({ children }) => {
         <div className="relative z-10 w-full h-full flex flex-col pointer-events-auto">
           {/* Max width container for large screens to prevent stretching */}
           <div className="w-full h-full mx-auto md:max-w-7xl px-0 md:px-4 lg:px-8 flex-1 flex flex-col">
-             {children}
+            {children}
           </div>
         </div>
       </SidebarAwareContainer>

@@ -792,12 +792,14 @@ const HistoryPage: React.FC = () => {
                                                                         <HistoryIcon size={14} />
                                                                     </button>
                                                                     {/* HIER: Aufruf der neuen Lösch-Funktion statt confirm() */}
-                                                                    <button
-                                                                        onClick={() => handleDeleteClick(entry)}
-                                                                        className="p-1.5 text-red-400/50 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                                                                    >
-                                                                        <Trash2 size={14} />
-                                                                    </button>
+                                                                    {!entry.isAbsence && (
+                                                                        <button
+                                                                            onClick={() => handleDeleteClick(entry)}
+                                                                            className="p-1.5 text-red-400/50 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                                                        >
+                                                                            <Trash2 size={14} />
+                                                                        </button>
+                                                                    )}
                                                                 </div>
                                                             )}
                                                             {entry.is_deleted && (

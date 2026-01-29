@@ -6,7 +6,7 @@ import { supabase } from '../services/supabaseClient';
 import { GlassCard, GlassButton, GlassInput } from '../components/GlassCard';
 import {
     ArrowLeft, Calendar, User, Save, Clock, FileText, ChevronLeft, ChevronRight,
-    Palmtree, Briefcase, Plus, TrendingDown, Trash2, X, Check,
+    Palmtree, Briefcase, Plus, TrendingDown, Trash2, X, Check, Send,
     AlertTriangle, Layout, Coffee, Siren, Percent, MoreVertical,
     Lock, Unlock, Edit2, RotateCcw, Scale, Calculator, CalendarHeart, Stethoscope, UserCheck, Ban, Info, XCircle, History as HistoryIcon,
     Printer, StickyNote, CheckCircle, TrendingUp, ChevronDown, ChevronUp, CalendarCheck, ShieldAlert, List, Hash
@@ -63,6 +63,7 @@ const OfficeUserPage: React.FC = () => {
 
     // Rejection State
     const [rejectionModal, setRejectionModal] = useState<{ isOpen: boolean; entryId: string | null; reason: string }>({ isOpen: false, entryId: null, reason: '' });
+    const [deletionModal, setDeletionModal] = useState<{ isOpen: boolean; absenceId: string | null; reason: string; successMsg?: string; errorMsg?: string }>({ isOpen: false, absenceId: null, reason: '' });
 
     // Unpaid Reason State in Modal
     const [unpaidReason, setUnpaidReason] = useState('');
@@ -75,6 +76,14 @@ const OfficeUserPage: React.FC = () => {
     const [quotaAuditLogs, setQuotaAuditLogs] = useState<any[]>([]);
     const [showPermissionError, setShowPermissionError] = useState(false);
     const [quotaNotifications, setQuotaNotifications] = useState<any[]>([]); // NEU: Pending Notifications
+
+    // Generic Alert Modal
+    const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'info' | 'warning' | 'error' }>({ isOpen: false, title: '', message: '', type: 'info' });
+
+    // Print Enforcement State for Deletion
+    const [deletionPrintStatus, setDeletionPrintStatus] = useState(false);
+
+
 
     // --- WORK MODEL EDIT STATE ---
     const [isEditingWorkModel, setIsEditingWorkModel] = useState(false);
@@ -219,6 +228,23 @@ const OfficeUserPage: React.FC = () => {
     }, [monthEntries]);
 
     const pendingRequests = useMemo(() => requests.filter(r => r.status === 'pending'), [requests]);
+
+    // Fix: Only show approved requests if they map to an existing, non-deleted absence
+    const approvedRequests = useMemo(() => {
+        return requests
+            .filter(r => {
+                if (r.status !== 'approved') return false;
+                // Check if a matching absence exists
+                const hasAbsence = absences?.some(a =>
+                    a.start_date === r.start_date &&
+                    a.end_date === r.end_date &&
+                    a.type === 'vacation'
+                );
+                return hasAbsence;
+            })
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            .slice(0, 5);
+    }, [requests, absences]);
     const analysisTotal = analysisEntries.reduce((acc, e) => acc + e.hours, 0);
 
     // --- LIFETIME BALANCE LOGIC ---
@@ -585,8 +611,30 @@ const OfficeUserPage: React.FC = () => {
     };
 
     const handleRemoveAbsence = async (id: string) => {
+        const { data: { user } } = await supabase.auth.getUser();
+
+        // If "Admin" managing other user
+        if (currentUser && currentUser.user_id !== user?.id) {
+            setDeletionPrintStatus(false); // Reset print status
+            setDeletionModal({ isOpen: true, absenceId: id, reason: '' });
+            return;
+        }
+
+        // Own entry -> Delete directly
         await deleteAbsence(id);
         setSelectedDay(null);
+    };
+
+    const confirmDeletionRequest = async () => {
+        if (!deletionModal.absenceId || !deletionModal.reason) return;
+        const res = await deleteAbsence(deletionModal.absenceId, deletionModal.reason);
+
+        if (res.success) {
+            // Show success message within modal, wait for click to close
+            setDeletionModal(prev => ({ ...prev, successMsg: res.message || "Löschung erfolgreich beantragt." }));
+        } else {
+            setDeletionModal(prev => ({ ...prev, errorMsg: res.message || "Ein Fehler ist aufgetreten." }));
+        }
     };
 
     const handleAddEntry = async () => {
@@ -628,7 +676,7 @@ const OfficeUserPage: React.FC = () => {
 
 
     // --- PDF GENERATION FOR VACATION REQUEST ---
-    const generateVacationRequestPDF = async (request: any) => {
+    const generateVacationRequestPDF = async (request: any, isCopy: boolean = false) => {
         const doc = new jsPDF();
 
         // Helper to load image
@@ -645,7 +693,7 @@ const OfficeUserPage: React.FC = () => {
         try {
             if (logoRebelein) {
                 await loadImage(logoRebelein).then(img => {
-                    doc.addImage(img, 'JPEG', 150, 10, 40, 25); // Top Right
+                    doc.addImage(img, 'JPEG', 150, 10, 50, 25); // Top Right (Increased Size)
                 }).catch(err => console.error("Logo load error", err));
             }
         } catch (e) { console.log("No logo"); }
@@ -666,7 +714,8 @@ const OfficeUserPage: React.FC = () => {
         const carryOver = settings.vacation_days_carryover || 0;
         const totalAvailable = yearlyQuota + carryOver;
 
-        // Get all requests for this year (excluding rejected)
+        // Get all requests for this year (excluding rejected AND deleted)
+        // BUGFIX here: explicitly check for !is_deleted
         const yearRequests = requests.filter(r => {
             const rDate = new Date(r.start_date);
             return rDate.getFullYear() === reqYear && r.status !== 'rejected';
@@ -711,6 +760,11 @@ const OfficeUserPage: React.FC = () => {
         doc.setFontSize(24);
         doc.setTextColor(...headerColor);
         doc.text("URLAUBSANTRAG", 20, 25);
+        if (isCopy) {
+            doc.setFontSize(14);
+            doc.setTextColor(200, 50, 50);
+            doc.text("(KOPIE)", 100, 25);
+        }
 
         doc.setFontSize(10);
         doc.setTextColor(100, 100, 100);
@@ -720,7 +774,7 @@ const OfficeUserPage: React.FC = () => {
         doc.setFontSize(10);
         doc.text("Rebelein GmbH", 20, 45);
         doc.setFont("helvetica", "normal");
-        doc.text("Heizung - Sanitär - Spenglerei", 20, 50);
+        doc.text("Heizung - Sanitär - Solartechnik", 20, 50); // UPDATED TEXT
 
         // Separator
         doc.setDrawColor(200, 200, 200);
@@ -810,24 +864,122 @@ const OfficeUserPage: React.FC = () => {
         // Footer
         doc.setFontSize(8);
         doc.setTextColor(150, 150, 150);
-        doc.text("Rebelein GmbH • Zeume Str. 1 • 91154 Roth", 105, 280, { align: 'center' });
+        // UPDATED ADDRESS
+        doc.text("Stefan Rebelein Sanitär GmbH • Martin-Behaim-Straße 6 • 90765 Fürth – Stadeln", 105, 280, { align: 'center' });
         doc.text(`Antrag ID: ${request.id.substring(0, 8)}`, 105, 285, { align: 'center' });
 
-        doc.save(`Urlaubsantrag_${currentUser?.display_name || 'MA'}_${request.start_date}.pdf`);
+        doc.save(`Urlaubsantrag_${currentUser?.display_name || 'MA'}_${request.start_date}${isCopy ? '_KOPIE' : ''}.pdf`);
 
         // --- UPDATE REQUEST WITH PRINT LOG ---
-        const viewerName = viewerSettings?.display_name || 'Unbekannt';
-        const printLog = `[Gedruckt von ${viewerName} am ${new Date().toLocaleDateString('de-DE')} ${new Date().toLocaleTimeString('de-DE')}]`;
-        const newNote = request.note ? `${request.note}\n${printLog}` : printLog;
+        if (!isCopy) {
+            const viewerName = viewerSettings?.display_name || 'Unbekannt';
+            const printLog = `[Gedruckt von ${viewerName} am ${new Date().toLocaleDateString('de-DE')} ${new Date().toLocaleTimeString('de-DE')}]`;
 
-        const { error } = await supabase
-            .from('vacation_requests')
-            .update({ note: newNote })
-            .eq('id', request.id);
+            const currentNote = request.note || '';
+            const newNote = currentNote ? `${currentNote}\n${printLog}` : printLog;
 
-        if (!error) {
-            window.location.reload();
+            const { error } = await supabase
+                .from('vacation_requests')
+                .update({ note: newNote })
+                .eq('id', request.id);
+
+            if (!error) {
+                window.location.reload();
+            }
         }
+    };
+
+    // --- WORKFLOW HELPERS ---
+    const handleApproveRequest = async (req: any) => {
+        // Enforce Print Check
+        const note = req.note || '';
+        if (!note.includes("[Gedruckt")) {
+            setAlertModal({
+                isOpen: true,
+                title: "Drucken erforderlich",
+                message: "ACHTUNG: Dieser Antrag wurde noch nicht ausgedruckt!\n\nBitte drucken Sie den Antrag zuerst aus (Drucker-Symbol), bevor Sie ihn genehmigen.",
+                type: 'warning'
+            });
+            return;
+        }
+
+        // Proceed
+        approveRequest(req);
+    };
+
+    // --- PDF FOR DELETION REQUEST ---
+    const generateDeletionRequestPDF = async (absence: any, reason: string) => {
+        const doc = new jsPDF();
+
+        // Load Logo Helper (reused)
+        const loadImage = (src: string): Promise<HTMLImageElement> => {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = "Anonymous";
+                img.src = src;
+                img.onload = () => resolve(img);
+                img.onerror = reject;
+            });
+        };
+
+        try {
+            if (logoRebelein) {
+                await loadImage(logoRebelein).then(img => {
+                    doc.addImage(img, 'JPEG', 150, 10, 50, 25);
+                });
+            }
+        } catch (e) { }
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(20);
+        doc.setTextColor(200, 50, 50); // Red
+        doc.text("LÖSCHUNGSANTRAG", 20, 25);
+
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        doc.text("Rebelein GmbH", 20, 45);
+        doc.setFont("helvetica", "normal");
+        doc.text("Heizung - Sanitär - Solartechnik", 20, 50);
+
+        doc.setDrawColor(200, 200, 200);
+        doc.line(20, 55, 190, 55);
+
+        // Info
+        doc.setFontSize(11);
+        doc.text(`Mitarbeiter: ${currentUser?.display_name || 'Unbekannt'}`, 20, 70);
+        doc.text(`Datum: ${new Date().toLocaleDateString('de-DE')}`, 140, 70);
+
+        // Content
+        doc.setFont("helvetica", "bold");
+        doc.text("Hiermit wird die Löschung des folgenden Urlaubs/Abwesenheit beantragt:", 20, 90);
+
+        doc.setFont("helvetica", "normal");
+        autoTable(doc, {
+            startY: 100,
+            head: [['Zeitraum', 'Typ', 'Begründung für Löschung']],
+            body: [[
+                `${new Date(absence.start_date).toLocaleDateString('de-DE')} - ${new Date(absence.end_date).toLocaleDateString('de-DE')}`,
+                absence.type === 'vacation' ? 'Urlaub' : absence.type,
+                reason
+            ]],
+            theme: 'grid'
+        });
+
+        // Signatures
+        // @ts-ignore
+        const finalY = doc.lastAutoTable.finalY + 40;
+
+        doc.line(20, finalY, 90, finalY);
+        doc.setFontSize(9);
+        doc.text("Unterschrift Mitarbeiter (Kenntnisnahme)", 20, finalY + 5);
+
+        doc.line(110, finalY, 180, finalY);
+        doc.text("Unterschrift Geschäftsleitung (Antragsteller)", 110, finalY + 5);
+
+        doc.save(`Loeschungsantrag_${currentUser?.display_name}_${absence.start_date}.pdf`);
+
+        // Mark as printed in state
+        setDeletionPrintStatus(true);
     };
 
     const handleDeleteEntryWithReason = async (entryId: string) => {
@@ -960,7 +1112,7 @@ const OfficeUserPage: React.FC = () => {
                                                 <button onClick={() => generateVacationRequestPDF(req)} className="flex items-center gap-2 px-3 py-2 bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-lg hover:bg-blue-500/30 font-bold text-sm transition-colors" title="PDF drucken">
                                                     <Printer size={16} />
                                                 </button>
-                                                <button onClick={() => approveRequest(req)} className="flex items-center gap-2 px-3 py-2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-lg hover:bg-emerald-500/30 font-bold text-sm transition-colors">
+                                                <button onClick={() => handleApproveRequest(req)} className="flex items-center gap-2 px-3 py-2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-lg hover:bg-emerald-500/30 font-bold text-sm transition-colors">
                                                     <CalendarCheck size={16} /> Genehmigen & Eintragen
                                                 </button>
                                             </>
@@ -975,6 +1127,8 @@ const OfficeUserPage: React.FC = () => {
                     </GlassCard>
                 </div>
             )}
+
+
 
             {/* PENDING CONFIRMATIONS */}
             {pendingEntries.length > 0 && (
@@ -1490,6 +1644,36 @@ const OfficeUserPage: React.FC = () => {
                                     </div>
                                 )}
                             </div>
+
+                            {/* APPROVED REQUESTS SUB-SECTION */}
+                            {canManage && approvedRequests.length > 0 && (
+                                <div className="mt-4 pt-3 border-t border-white/5">
+                                    <label className="text-[10px] uppercase font-bold text-emerald-400/70 block mb-2 flex items-center gap-2">
+                                        <CheckCircle size={12} /> Genehmigte Urlaubsanträge (Letzte 5)
+                                    </label>
+                                    <div className="space-y-2">
+                                        {approvedRequests.map(req => (
+                                            <div key={req.id} className="bg-emerald-500/5 p-2 rounded border border-emerald-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                                <div>
+                                                    <div className="font-bold text-white text-xs">
+                                                        {new Date(req.start_date).toLocaleDateString('de-DE')} - {new Date(req.end_date).toLocaleDateString('de-DE')}
+                                                    </div>
+                                                    <div className="text-emerald-200/50 text-[10px]">
+                                                        {new Date(req.created_at).toLocaleDateString('de-DE')} • {req.approved_by_name || 'Admin'}
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    onClick={() => generateVacationRequestPDF(req, true)}
+                                                    className="px-2 py-1 bg-white/5 text-white/60 border border-white/10 rounded hover:bg-white/10 hover:text-white text-[10px] transition-colors flex items-center gap-1 self-start sm:self-center"
+                                                    title="Kopie drucken"
+                                                >
+                                                    <Printer size={10} /> Kopie
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                             <div className="flex-1 overflow-y-auto max-h-32 space-y-1 pr-1 border-t border-white/5 pt-2 mt-auto">
                                 <label className="text-[10px] uppercase font-bold text-white/30 block mb-1">Abwesenheiten ({vacationViewYear})</label>
                                 {groupedAbsences.length === 0 ? (
@@ -2161,6 +2345,99 @@ const OfficeUserPage: React.FC = () => {
             {/* Date Pickers */}
             {showAnalysisStartPicker && <GlassDatePicker value={analysisStart} onChange={setAnalysisStart} onClose={() => setShowAnalysisStartPicker(false)} />}
             {showAnalysisEndPicker && <GlassDatePicker value={analysisEnd} onChange={setAnalysisEnd} onClose={() => setShowAnalysisEndPicker(false)} />}
+
+            {/* ABSENCE DELETION REQUEST MODAL */}
+
+            {deletionModal.isOpen && (
+                <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                    <GlassCard className="w-full max-w-md border-red-500/50 shadow-2xl relative bg-gray-900/90 p-6">
+                        <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                            <Trash2 className="text-red-400" /> Löschung beantragen
+                        </h3>
+
+                        {deletionModal.successMsg ? (
+                            <div className="text-center py-6 space-y-4">
+                                <div className="mx-auto w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center text-emerald-400">
+                                    <CheckCircle size={24} />
+                                </div>
+                                <p className="text-emerald-300 font-medium">{deletionModal.successMsg}</p>
+                                <GlassButton onClick={() => setDeletionModal({ ...deletionModal, isOpen: false, successMsg: undefined })} variant="ghost">Schließen</GlassButton>
+                            </div>
+                        ) : deletionModal.errorMsg ? (
+                            <div className="text-center py-6 space-y-4">
+                                <div className="mx-auto w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center text-red-400">
+                                    <XCircle size={24} />
+                                </div>
+                                <p className="text-red-300 font-medium">{deletionModal.errorMsg}</p>
+                                <GlassButton onClick={() => setDeletionModal({ ...deletionModal, isOpen: false, errorMsg: undefined })} variant="ghost">Schließen</GlassButton>
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                <p className="text-white/70 text-sm">
+                                    Sie beantragen die Löschung einer Abwesenheit für diesen Mitarbeiter. <br />
+                                    <strong>Schritt 1:</strong> Grund angeben.<br />
+                                    <strong>Schritt 2:</strong> Löschantrag drucken & unterschreiben.<br />
+                                    <strong>Schritt 3:</strong> Antrag absenden.
+                                </p>
+
+                                <label className="text-xs uppercase font-bold text-white/50 mb-2 block">Begründung (Pflichtfeld)</label>
+                                <textarea
+                                    value={deletionModal.reason}
+                                    onChange={(e) => setDeletionModal(prev => ({ ...prev, reason: e.target.value }))}
+                                    placeholder="z.B. Urlaub storniert, Krankheitstag falsch..."
+                                    className="w-full bg-black/20 border border-white/10 rounded-xl p-3 text-white text-sm focus:border-red-500/50 outline-none resize-none h-24 mb-4"
+                                />
+
+                                <div className="flex gap-2 pt-2">
+                                    <button
+                                        onClick={() => {
+                                            if (!deletionModal.reason) { alert("Bitte erst einen Grund angeben."); return; }
+                                            const absence = absences?.find(a => a.id === deletionModal.absenceId);
+                                            if (absence) generateDeletionRequestPDF(absence, deletionModal.reason);
+                                        }}
+                                        disabled={!deletionModal.reason}
+                                        className={`flex-1 py-3 px-4 rounded-xl border font-bold flex items-center justify-center gap-2 transition-all ${deletionModal.reason ? 'bg-blue-500/20 border-blue-500/50 text-blue-300 hover:bg-blue-500/30' : 'opacity-50 cursor-not-allowed bg-white/5 text-white/30 border-white/10'}`}
+                                    >
+                                        <Printer size={18} />
+                                        {deletionPrintStatus ? 'Erneut Drucken' : 'Antrag Drucken'}
+                                    </button>
+
+                                    <button
+                                        onClick={confirmDeletionRequest}
+                                        disabled={!deletionPrintStatus || !deletionModal.reason}
+                                        className={`flex-1 py-3 px-4 rounded-xl border font-bold flex items-center justify-center gap-2 transition-all ${deletionPrintStatus && deletionModal.reason ? 'bg-red-500/20 border-red-500/50 text-red-300 hover:bg-red-500/30' : 'opacity-50 cursor-not-allowed bg-white/5 text-white/30 border-white/10'}`}
+                                    >
+                                        <Send size={18} /> Beantragen
+                                    </button>
+                                </div>
+
+                                <GlassButton onClick={() => setDeletionModal({ ...deletionModal, isOpen: false })} variant="ghost" className="w-full">
+                                    Abbrechen
+                                </GlassButton>
+                            </div>
+                        )}
+                    </GlassCard>
+                </div>
+            )}
+
+            {/* ALERT MODAL */}
+            {alertModal.isOpen && (
+                <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <GlassCard className="max-w-md w-full !border-amber-500/30">
+                        <div className="flex flex-col items-center gap-4 text-center">
+                            <div className="p-3 rounded-full bg-amber-500/20 text-amber-400">
+                                <AlertTriangle size={32} />
+                            </div>
+                            <h3 className="text-xl font-bold text-white">{alertModal.title}</h3>
+                            <p className="text-white/70 whitespace-pre-line">{alertModal.message}</p>
+                            <GlassButton onClick={() => setAlertModal({ ...alertModal, isOpen: false })} variant="primary" className="w-full mt-2">
+                                OK
+                            </GlassButton>
+                        </div>
+                    </GlassCard>
+                </div>
+            )}
+
             {/* Rejection Modal */}
             {
                 rejectionModal.isOpen && (

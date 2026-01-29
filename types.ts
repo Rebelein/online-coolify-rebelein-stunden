@@ -118,6 +118,17 @@ export interface UserAbsence {
   type: 'vacation' | 'sick' | 'holiday' | 'unpaid' | 'sick_child' | 'sick_pay';
   note?: string;
   submitted?: boolean;
+
+  // Deletion Workflow
+  is_deleted?: boolean;
+  deleted_at?: string;
+  deleted_by?: string;
+  deletion_reason?: string;
+  deletion_confirmed_by_user?: boolean;
+
+  deletion_requested_at?: string;
+  deletion_requested_by?: string;
+  deletion_request_reason?: string;
 }
 
 export interface VacationRequest {
