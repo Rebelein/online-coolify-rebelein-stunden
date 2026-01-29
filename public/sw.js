@@ -1,4 +1,4 @@
-const CACHE_NAME = 'zeiterfassung-v61';
+const CACHE_NAME = 'zeiterfassung-v63';
 
 const ASSETS = [
   '/',
@@ -8,9 +8,26 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting(); // Force new SW to take over immediately
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cacheName) => {
+          if (cacheName !== CACHE_NAME) {
+            console.log('Service Worker: Clearing old cache', cacheName);
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    })
+  );
+  self.clients.claim(); // Take control of all clients immediately
 });
 
 // IndexedDB Helper für Share Target
@@ -62,7 +79,18 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Normal Fetch Strategy
+  // NAVIGATION REQUESTS: Network First (HTML)
+  // This ensures we always get the latest index.html from server if online.
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => {
+        return caches.match('/index.html');
+      })
+    );
+    return;
+  }
+
+  // ASSETS (JS, CSS, Images): Cache First, fallback to Network
   event.respondWith(
     caches.match(event.request).then((response) => {
       return response || fetch(event.request);
