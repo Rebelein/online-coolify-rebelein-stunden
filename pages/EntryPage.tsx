@@ -1626,6 +1626,7 @@ const EntryPage: React.FC = () => {
                                     value={client}
                                     onChange={(e) => setClient(e.target.value)}
                                     onBlur={() => { if (client.length > 0) setShowOrderInput(true); }}
+                                    onFocus={() => setShowOrderInput(false)}
                                     required
                                     className={`h-10 md:h-12 text-base md:text-lg ${client.length > 0 && !showOrderInput ? 'pr-20' : 'pr-10'} ${entryType !== 'work' && entryType !== 'emergency_service' ? 'text-white/90' : ''}`}
                                 />

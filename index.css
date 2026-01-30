@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+body {
+    font-family: 'Inter', sans-serif;
+    background: #0f172a;
+    /* Fallback */
+    overscroll-behavior-y: none;
+    /* Prevents pull-to-refresh on mobile */
+}
+
+/* Custom Scrollbar for Webkit */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 10px;
+}
+
+/* iOS PWA Fix: Ensure inputs are selectable and interactable */
+* {
+    -webkit-tap-highlight-color: transparent;
+}
+
+input,
+textarea,
+select,
+[contenteditable] {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+    /* Fix for iOS PWA focus issues: forcing hardware acceleration */
+    transform: translate3d(0, 0, 0);
+}

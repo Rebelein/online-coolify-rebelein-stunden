@@ -14,7 +14,7 @@ import OfficeUserListPage from './pages/OfficeUserListPage';
 import OfficeUserPage from './pages/OfficeUserPage';
 import AdvancedAnalysisPage from './pages/AdvancedAnalysisPage';
 import { UpdateNotification } from './components/UpdateNotification';
-import { InstallPrompt } from './components/InstallPrompt';
+
 
 // Wrapper component to handle route changes for SW updates
 const ServiceWorkerUpdater: React.FC<{ registration: ServiceWorkerRegistration | null }> = ({ registration }) => {
@@ -102,11 +102,26 @@ const App: React.FC = () => {
   useEffect(() => {
     const initSession = async () => {
       try {
-        const { data, error } = await supabase.auth.getSession();
+        // Create a timeout promise that rejects after 2 seconds
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Session check timed out')), 2000)
+        );
+
+        // Race between session check and timeout
+        const { data, error } = await Promise.race([
+          supabase.auth.getSession(),
+          timeoutPromise
+        ]) as any;
+
         if (error) throw error;
-        setSession(data.session);
+
+        if (data && data.session) {
+          setSession(data.session);
+        }
       } catch (err) {
-        console.error("Fehler beim Laden der Session:", err);
+        console.error("Fehler beim Laden der Session (oder Timeout):", err);
+        // On timeout or error, we just proceed as unauthenticated (show login)
+        // instead of hanging forever.
       } finally {
         setLoading(false);
       }
@@ -140,7 +155,7 @@ const App: React.FC = () => {
       <GlassLayout>
         <AuthPage />
         {showUpdateParams && <UpdateNotification onUpdate={handleUpdateApp} />}
-        {!showUpdateParams && <InstallPrompt />}
+
       </GlassLayout>
     );
   }
@@ -168,7 +183,7 @@ const App: React.FC = () => {
         <BottomNav />
         {/* Global Update Notification & Install Prompt */}
         {showUpdateParams && <UpdateNotification onUpdate={handleUpdateApp} />}
-        {!showUpdateParams && <InstallPrompt />}
+
       </GlassLayout>
     </Router>
   );
