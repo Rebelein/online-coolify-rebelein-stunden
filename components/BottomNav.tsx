@@ -33,6 +33,14 @@ const BottomNav: React.FC = () => {
             else if (path) navigate(path);
         };
 
+        // Determine text color class
+        let textColorClass = 'text-white/50 group-hover:text-white/80'; // Default
+        if (isActive) {
+            textColorClass = 'text-teal-400';
+        } else if (colorClass) {
+            textColorClass = colorClass; // Use provided color directly if not active
+        }
+
         return (
             <button
                 type="button"
@@ -41,8 +49,8 @@ const BottomNav: React.FC = () => {
             ${/* Mobile Styles (unchanged) */ ''}
             flex-col w-full h-full md:flex-row md:h-12 md:rounded-xl md:px-3 md:gap-3
             ${/* Desktop Styles */ ''}
-            ${isActive ? 'text-teal-400 bg-white/5' : 'text-white/50 hover:text-white/80 hover:bg-white/5'}
-            ${colorClass && !isActive ? colorClass : ''}
+            ${isActive ? 'bg-white/5' : 'hover:bg-white/5'}
+            ${textColorClass}
             ${!isExpanded ? 'md:justify-center' : 'md:justify-start'}
         `}
                 title={!isExpanded ? label : undefined}
@@ -93,8 +101,8 @@ const BottomNav: React.FC = () => {
                         {/* Office Modules Mobile */}
                         {isOfficeOrAdmin && (
                             <>
-                                <NavItem path="/office" icon={LayoutDashboard} label="Büro" colorClass="text-orange-400/70" />
-                                <NavItem path="/office/users" icon={Users} label="Benutzer" colorClass="text-orange-400/70" />
+                                <NavItem path="/office" icon={LayoutDashboard} label="Büro" colorClass="text-orange-400" />
+                                <NavItem path="/office/users" icon={Users} label="Benutzer" colorClass="text-green-400" />
                             </>
                         )}
 
@@ -136,9 +144,9 @@ const BottomNav: React.FC = () => {
 
                         {isOfficeOrAdmin && (
                             <>
-                                <NavItem path="/office" icon={LayoutDashboard} label="Dashboard" colorClass="text-orange-400/70" badgeCount={totalCount} />
-                                <NavItem path="/office/users" icon={Users} label="Benutzer" colorClass="text-orange-400/70" />
-                                <NavItem path="/office/analysis" icon={Presentation} label="Profi-Auswertung" colorClass="text-purple-400/70" />
+                                <NavItem path="/office" icon={LayoutDashboard} label="Dashboard" colorClass="text-orange-400" badgeCount={totalCount} />
+                                <NavItem path="/office/users" icon={Users} label="Benutzer" colorClass="text-green-400" />
+                                <NavItem path="/office/analysis" icon={Presentation} label="Profi-Auswertung" colorClass="text-purple-400" />
                             </>
                         )}
                     </div>

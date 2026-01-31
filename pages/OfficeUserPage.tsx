@@ -58,7 +58,17 @@ const OfficeUserPage: React.FC = () => {
     // Modal & Editing
     const [selectedDay, setSelectedDay] = useState<Date | null>(null);
     const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
-    const [editForm, setEditForm] = useState({ date: '', client_name: '', hours: '', start_time: '', end_time: '', note: '', reason: '' });
+    const [editForm, setEditForm] = useState<{ date: string; client_name: string; hours: string; start_time: string; end_time: string; note: string; reason: string; type?: string; surcharge?: number; }>({
+        date: '',
+        client_name: '',
+        hours: '',
+        start_time: '',
+        end_time: '',
+        note: '',
+        reason: '',
+        type: 'work',
+        surcharge: 0
+    });
     const [newEntryForm, setNewEntryForm] = useState({ client_name: '', hours: '', start_time: '', end_time: '', type: 'work', surcharge: 0 });
 
     // Rejection State
@@ -579,8 +589,21 @@ const OfficeUserPage: React.FC = () => {
 
         // Reset forms
         const dateStr = getLocalISOString(date);
-        setEditForm({ date: dateStr, client_name: '', hours: '', start_time: '', end_time: '', note: '', reason: '' });
-        setNewEntryForm({ client_name: '', hours: '', start_time: '', end_time: '', type: 'work', surcharge: 0 });
+        let autoStart = '';
+        if (entries) {
+            const dayEntries = entries.filter(e => e.date === dateStr && !e.is_deleted && !e.deleted_at);
+            if (dayEntries.length > 0) {
+                // Find latest end_time
+                // Sort by end_time desc
+                const sorted = [...dayEntries].sort((a, b) => (b.end_time || '').localeCompare(a.end_time || ''));
+                if (sorted.length > 0) {
+                    autoStart = sorted[0].end_time || '';
+                }
+            }
+        }
+
+        setEditForm({ date: dateStr, client_name: '', hours: '', start_time: '', end_time: '', note: '', reason: '', type: 'work', surcharge: 0 });
+        setNewEntryForm({ client_name: '', hours: '', start_time: autoStart, end_time: '', type: 'work', surcharge: 0 });
         setUnpaidReason('');
     };
 
@@ -668,7 +691,9 @@ const OfficeUserPage: React.FC = () => {
             start_time: editForm.start_time || undefined,
             end_time: editForm.end_time || undefined,
             note: editForm.note || undefined,
-            client_name: editForm.client_name
+            client_name: editForm.client_name,
+            type: (editForm as any).type || 'work',
+            surcharge: (editForm as any).surcharge || 0
         }, editForm.reason);
         setEditingEntry(null);
     };
@@ -1030,6 +1055,48 @@ const OfficeUserPage: React.FC = () => {
     // --- UI Helpers ---
     const dayNames = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
     const dayIndices = [1, 2, 3, 4, 5, 6, 0];
+
+    // Smart Time Input Helper
+    const handleSmartTimeInput = (val: string) => {
+        // Remove non-digits
+        const digits = val.replace(/[^0-9]/g, '');
+        if (!digits) return val;
+
+        // Logic:
+        // 1 digit: '7' -> '07:00'
+        // 2 digits: '14' -> '14:00', '07' -> '07:00'
+        // 3 digits: '730' -> '07:30'
+        // 4 digits: '1430' -> '14:30'
+
+        if (digits.length === 1) return `0${digits}:00`;
+        if (digits.length === 2) {
+            // Check if > 24, might be minutes? Assuming hours for simplicity as per request
+            return `${digits}:00`;
+        }
+        if (digits.length === 3) {
+            return `0${digits[0]}:${digits.substring(1)}`;
+        }
+        if (digits.length === 4) {
+            return `${digits.substring(0, 2)}:${digits.substring(2)}`;
+        }
+        return val;
+    };
+
+    // Auto-Calculate Hours Effect
+    useEffect(() => {
+        if (newEntryForm.start_time && newEntryForm.end_time) {
+            // check validation regex
+            const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+            if (timeRegex.test(newEntryForm.start_time) && timeRegex.test(newEntryForm.end_time)) {
+                const start = new Date(`2000-01-01T${newEntryForm.start_time}`);
+                const end = new Date(`2000-01-01T${newEntryForm.end_time}`);
+                if (end > start) {
+                    const diff = (end.getTime() - start.getTime()) / 1000 / 60 / 60; // in hours
+                    setNewEntryForm(prev => ({ ...prev, hours: diff.toFixed(2) }));
+                }
+            }
+        }
+    }, [newEntryForm.start_time, newEntryForm.end_time]);
 
     const selectedDateStr = getSelectedDateString();
     const currentAbsence = selectedDay ? absences.find(a => selectedDateStr >= a.start_date && selectedDateStr <= a.end_date) : null;
@@ -2033,6 +2100,11 @@ const OfficeUserPage: React.FC = () => {
                                         });
                                         displayHours -= deduction;
                                         displayHours = Math.max(0, displayHours);
+
+                                        // NEW: Apply Surcharge for Display
+                                        if (entry.type === 'emergency_service' && entry.surcharge && entry.surcharge > 0) {
+                                            displayHours = displayHours * (1 + (entry.surcharge / 100));
+                                        }
                                     }
 
                                     return (
@@ -2042,7 +2114,25 @@ const OfficeUserPage: React.FC = () => {
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                         <div>
                                                             <label className="text-[10px] text-white/40 uppercase font-bold mb-1 block">Kunde / Projekt</label>
-                                                            <GlassInput type="text" value={editForm.client_name} onChange={e => setEditForm({ ...editForm, client_name: e.target.value })} className="!py-2 !text-sm" />
+                                                            <div className="flex gap-2">
+                                                                <div className="w-1/3 min-w-[100px]">
+                                                                    <select
+                                                                        value={(editForm as any).type || 'work'}
+                                                                        onChange={e => setEditForm({ ...editForm, type: e.target.value } as any)}
+                                                                        className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-white text-sm appearance-none focus:outline-none focus:border-teal-500/50"
+                                                                    >
+                                                                        <option value="work" className="bg-gray-800">Projekt</option>
+                                                                        <option value="break" className="bg-gray-800 text-amber-300">Pause</option>
+                                                                        <option value="company" className="bg-gray-800">Firma</option>
+                                                                        <option value="office" className="bg-gray-800">Büro</option>
+                                                                        <option value="warehouse" className="bg-gray-800">Lager</option>
+                                                                        <option value="car" className="bg-gray-800">Auto</option>
+                                                                        <option value="overtime_reduction" className="bg-gray-800 text-pink-300">Gutstunden</option>
+                                                                        <option value="emergency_service" className="bg-gray-800 text-rose-300">Notdienst</option>
+                                                                    </select>
+                                                                </div>
+                                                                <GlassInput type="text" value={editForm.client_name} onChange={e => setEditForm({ ...editForm, client_name: e.target.value })} className="!py-2 !text-sm flex-1" />
+                                                            </div>
                                                         </div>
                                                         <div className="grid grid-cols-2 gap-2">
                                                             <div>
@@ -2065,6 +2155,28 @@ const OfficeUserPage: React.FC = () => {
                                                             <GlassInput type="text" value={editForm.reason} onChange={e => setEditForm({ ...editForm, reason: e.target.value })} className="!py-2 !text-sm border-orange-500/30 bg-orange-500/10 placeholder-orange-300/30" placeholder="Warum wird geändert?" />
                                                         </div>
                                                     </div>
+                                                    {(editForm as any).type === 'emergency_service' && (
+                                                        <div className="mt-2 bg-rose-500/10 border border-rose-500/20 rounded-lg p-2 flex items-center justify-between">
+                                                            <div className="flex items-center gap-2 text-rose-300">
+                                                                <Percent size={14} />
+                                                                <span className="text-[10px] uppercase font-bold">Zuschlag</span>
+                                                            </div>
+                                                            <div className="flex gap-1">
+                                                                {[0, 25, 50, 100].map(val => (
+                                                                    <button
+                                                                        key={val}
+                                                                        onClick={() => setEditForm({ ...editForm, surcharge: val } as any)}
+                                                                        className={`px-2 py-1 rounded text-[10px] font-bold font-mono border transition-all ${(editForm as any).surcharge === val
+                                                                            ? 'bg-rose-500/20 text-rose-100 border-rose-500/50'
+                                                                            : 'bg-white/5 text-white/30 border-white/5 hover:bg-white/10'
+                                                                            }`}
+                                                                    >
+                                                                        {val}%
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                     <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
                                                         <button onClick={() => setEditingEntry(null)} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-colors">Abbrechen</button>
                                                         <button onClick={handleSaveEntryEdit} className="px-3 py-2 rounded-lg bg-teal-500 hover:bg-teal-600 text-white text-xs font-bold transition-colors flex items-center gap-2"><Save size={14} /> Speichern</button>
@@ -2209,7 +2321,7 @@ const OfficeUserPage: React.FC = () => {
                                                             {canManage && !isDeleted && (
                                                                 <div className="flex items-center gap-2 ml-2 pl-2 border-l border-white/10">
                                                                     <button
-                                                                        onClick={() => { setEditingEntry(entry); setEditForm({ ...editForm, client_name: entry.client_name, hours: entry.hours.toString().replace('.', ','), start_time: entry.start_time || '', end_time: entry.end_time || '', note: entry.note || '', reason: '' }) }}
+                                                                        onClick={() => { setEditingEntry(entry); setEditForm({ ...editForm, client_name: entry.client_name, hours: entry.hours.toString().replace('.', ','), start_time: entry.start_time || '', end_time: entry.end_time || '', note: entry.note || '', reason: '', type: entry.type, surcharge: entry.surcharge || 0 }) }}
                                                                         title="Bearbeiten"
                                                                         className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-white/50 bg-white/5 border border-white/10 hover:bg-white/10 hover:text-white"
                                                                     >
@@ -2285,6 +2397,7 @@ const OfficeUserPage: React.FC = () => {
                                         <div className="md:col-span-1 relative">
                                             <select value={newEntryForm.type} onChange={e => setNewEntryForm({ ...newEntryForm, type: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500/50 transition-all cursor-pointer text-sm font-medium">
                                                 <option value="work" className="bg-gray-800 text-white">Projekt</option>
+                                                <option value="break" className="bg-gray-800 text-amber-300">Pause</option>
                                                 <option value="company" className="bg-gray-800 text-white">Firma</option>
                                                 <option value="office" className="bg-gray-800 text-white">Büro</option>
                                                 <option value="warehouse" className="bg-gray-800 text-white">Lager</option>
@@ -2301,11 +2414,25 @@ const OfficeUserPage: React.FC = () => {
                                     <div className="grid grid-cols-3 gap-4">
                                         <div className="relative group">
                                             <label className="absolute -top-2 left-3 bg-[#1e2536] px-1 text-[10px] text-white/40 uppercase font-bold z-10 rounded">Von</label>
-                                            <GlassInput type="text" placeholder="HH:MM" value={newEntryForm.start_time} onChange={e => setNewEntryForm({ ...newEntryForm, start_time: e.target.value })} className="text-center font-mono" />
+                                            <GlassInput
+                                                type="text"
+                                                placeholder="HH:MM"
+                                                value={newEntryForm.start_time}
+                                                onChange={e => setNewEntryForm({ ...newEntryForm, start_time: e.target.value })}
+                                                onBlur={e => setNewEntryForm({ ...newEntryForm, start_time: handleSmartTimeInput(e.target.value) })}
+                                                className="text-center font-mono"
+                                            />
                                         </div>
                                         <div className="relative group">
                                             <label className="absolute -top-2 left-3 bg-[#1e2536] px-1 text-[10px] text-white/40 uppercase font-bold z-10 rounded">Bis</label>
-                                            <GlassInput type="text" placeholder="HH:MM" value={newEntryForm.end_time} onChange={e => setNewEntryForm({ ...newEntryForm, end_time: e.target.value })} className="text-center font-mono" />
+                                            <GlassInput
+                                                type="text"
+                                                placeholder="HH:MM"
+                                                value={newEntryForm.end_time}
+                                                onChange={e => setNewEntryForm({ ...newEntryForm, end_time: e.target.value })}
+                                                onBlur={e => setNewEntryForm({ ...newEntryForm, end_time: handleSmartTimeInput(e.target.value) })}
+                                                className="text-center font-mono"
+                                            />
                                         </div>
                                         <div className="relative group">
                                             <label className="absolute -top-2 right-3 bg-[#1e2536] px-1 text-[10px] text-teal-400 uppercase font-bold z-10 rounded">Std</label>

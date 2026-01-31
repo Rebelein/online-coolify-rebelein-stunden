@@ -1725,7 +1725,7 @@ const EntryPage: React.FC = () => {
                                                 {selectedTeamIds.length > 0 && <span className="text-white/50">{selectedTeamIds.length}</span>}
                                             </div>
                                             <div className="max-h-48 overflow-y-auto space-y-1">
-                                                {installers.filter(i => i.user_id !== settings.user_id).map(inst => (
+                                                {installers.filter(i => i.user_id !== settings.user_id && i.is_visible_to_others !== false).map(inst => (
                                                     <button
                                                         key={inst.user_id}
                                                         type="button"
@@ -1762,7 +1762,7 @@ const EntryPage: React.FC = () => {
                                                 >
                                                     Keine Bestätigung (Standard)
                                                 </button>
-                                                {installers.filter(i => i.user_id !== settings.user_id && (i.is_visible_to_others !== false || settings.role === 'admin' || settings.role === 'office')).map(installer => (
+                                                {installers.filter(i => i.user_id !== settings.user_id && i.is_visible_to_others !== false).map(installer => (
                                                     <button
                                                         key={installer.user_id}
                                                         type="button"

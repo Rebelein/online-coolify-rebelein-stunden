@@ -366,9 +366,9 @@ export const useTimeEntries = (customUserId?: string) => {
           confirmed_at: new Date().toISOString()
         };
       } else {
-        // Default: Draft (User must submit manually via 'Abgeben')
+        // Default: Draft (User must submit manually via 'Abgeben'), UNLESS explicitly submitted (e.g. by Admin)
         autoConfirmData = {
-          submitted: false
+          submitted: entry.submitted || false
         };
       }
 
@@ -386,8 +386,8 @@ export const useTimeEntries = (customUserId?: string) => {
 
     // --- LATE ENTRY LOGIC ---
     // Double check: If manual late reason provided and we haven't confirmed it yet
-    // Strict Rule: Late entries start as UNCONFIRMED DRAFTS.
-    if (entry.late_reason) {
+    // Strict Rule: Late entries start as UNCONFIRMED DRAFTS, unless explicitly submitted (e.g. by Admin/Office)
+    if (entry.late_reason && !entry.submitted) {
       autoConfirmData.submitted = false;
       delete autoConfirmData.confirmed_at;
       delete autoConfirmData.confirmed_by;
