@@ -1,8 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Self-Hosted Supabase Konfiguration (gemäß Benutzer-Input)
-const supabaseUrl = 'https://supabase-stunden.rebeleinapp.de';
-const supabaseKey = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc2NTE0MTc0MCwiZXhwIjo0OTIwODE1MzQwLCJyb2xlIjoiYW5vbiJ9._IWYbPcLUlaS1fvLo_Rowt4VqAD18d24OaARL_T0Hvw';
+// Cloud Supabase Konfiguration (Migration)
+// Cloud Supabase Konfiguration (Migration)
+const supabaseUrl = 'https://knawmxkyvzrmrjmgckht.supabase.co';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtuYXdteGt5dnpybXJqbWdja2h0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4NzgyNjAsImV4cCI6MjA4NTQ1NDI2MH0.u1-Yvu3z8PcMwpTq75kW7krWSN4TdnpWmkaXvcQWgHw';
 
 export const supabase = createClient(supabaseUrl, supabaseKey, {
     auth: {
