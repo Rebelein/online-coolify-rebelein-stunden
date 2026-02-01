@@ -8,7 +8,7 @@ import { supabase } from '../services/supabaseClient';
 import { formatDuration } from '../services/utils/timeUtils';
 
 const HistoryPage: React.FC = () => {
-    const { entries, deleteEntry, updateEntry, markAsSubmitted, loading, lockedDays, entryHistory, fetchEntryHistory } = useTimeEntries();
+    const { entries, deleteEntry, updateEntry, markAsSubmitted, loading, lockedDays, entryHistory, fetchEntryHistory, addEntry } = useTimeEntries();
     const { settings } = useSettings();
     const { dailyLogs, fetchDailyLogs } = useDailyLogs();
     const { absences, deleteAbsenceDay, fetchAbsences } = useAbsences();
@@ -244,7 +244,31 @@ const HistoryPage: React.FC = () => {
         if (viewMode === 'projects') {
             return currentMonthData.reduce((acc, [_, dayEntries]) => {
                 return acc + dayEntries.reduce((sum, e) => {
-                    const hours = e.is_deleted ? 0 : (e.type === 'emergency_service' && e.surcharge ? e.hours * (1 + e.surcharge / 100) : (e.type === 'break' || e.type === 'overtime_reduction' ? 0 : e.hours));
+                    if (e.is_deleted) return sum;
+                    if (e.type === 'break' || e.type === 'overtime_reduction') return sum;
+
+                    let hours = 0;
+
+                    // Priority: Server Calculated Values
+                    if (e.calc_duration_minutes !== undefined) {
+                        hours = Math.abs(e.calc_duration_minutes) / 60;
+
+                        // Add Surcharge if available (Server calculated or Fallback)
+                        if (e.type === 'emergency_service') {
+                            if (e.calc_surcharge_hours !== undefined) {
+                                hours += e.calc_surcharge_hours;
+                            } else if (e.surcharge) {
+                                hours = hours * (1 + e.surcharge / 100);
+                            }
+                        }
+                    } else {
+                        // Fallback: Client Calculation
+                        hours = e.hours; // types.ts check: 'hours' is the field
+                        if (e.type === 'emergency_service' && e.surcharge) {
+                            hours = hours * (1 + e.surcharge / 100);
+                        }
+                    }
+
                     return sum + hours;
                 }, 0);
             }, 0);
@@ -385,25 +409,36 @@ const HistoryPage: React.FC = () => {
         }
     };
 
+
     const handleMarkSubmittedOnly = async () => {
         let entriesToProcess = entries;
-        let startMoment: number | null = null;
-        let endMoment: number | null = null;
+        let datesToCheck: string[] = [];
 
         if (!submitAll) {
             const start = new Date(startDate);
             const end = new Date(endDate);
+            // ... (keep existing range logic for filtering entries, but also build date list)
             start.setHours(0, 0, 0, 0);
             end.setHours(23, 59, 59, 999);
-            startMoment = start.getTime();
-            endMoment = end.getTime();
+            const startMoment = start.getTime();
+            const endMoment = end.getTime();
+
+            // Build Date List for Auto-Break Check
+            let current = new Date(start);
+            while (current <= end) {
+                datesToCheck.push(getLocalISOString(current));
+                current.setDate(current.getDate() + 1);
+            }
 
             entriesToProcess = entries.filter(e => {
                 const d = new Date(e.date).getTime();
-                return d >= startMoment! && d <= endMoment!;
+                return d >= startMoment && d <= endMoment;
             });
 
             if (entriesToProcess.length === 0) {
+                // Even if no entries, we might need to check for auto-breaks? 
+                // If there are NO entries, there is NO work > 6h, so no auto break needed.
+                // So Safe to return.
                 alert("Keine Einträge im gewählten Zeitraum.");
                 return;
             }
@@ -414,6 +449,8 @@ const HistoryPage: React.FC = () => {
                 alert("Keine offenen Einträge gefunden.");
                 return;
             }
+            // Get unique dates from the unsubmitted entries
+            datesToCheck = Array.from(new Set(entriesToProcess.map(e => e.date)));
         }
 
         // Check for blocked entries (rejected/pending)
@@ -436,13 +473,11 @@ const HistoryPage: React.FC = () => {
         // Handle Absences
         // Absences normally don't need 'submission' in the same way, but we have a 'submitted' flag on them too in the local mapped View model?
         // Let's see... mapped absences have 'submitted' prop from DB.
-        // We need to filter absences from the same range or all if submitAll is true.
-
+        // We need to find all UNsubmitted absences from the source absences list, not just the mapped ones
+        // But 'entries' contains mapped absences.
         let absenceIds: string[] = [];
 
         if (submitAll) {
-            // We need to find all UNsubmitted absences from the source absences list, not just the mapped ones
-            // But 'entries' contains mapped absences.
             absenceIds = entriesToProcess
                 .filter(e => e.isAbsence && e.id.startsWith('abs-') && !e.submitted)
                 .map(e => e.id.split('-')[1])

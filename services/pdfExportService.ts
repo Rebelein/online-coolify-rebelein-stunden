@@ -345,7 +345,9 @@ export const generateProjectPdfBlob = (data: ExportData, startDate: string, endD
                 ];
             }
 
-            let durationMin = calculateDurationInMinutes(e.start_time || '', e.end_time || '', 0);
+            let durationMin = e.calc_duration_minutes !== undefined
+                ? Math.abs(e.calc_duration_minutes)
+                : calculateDurationInMinutes(e.start_time || '', e.end_time || '', 0);
 
             // Deduct Overlaps with BREAKS
             if (e.type !== 'break') {
@@ -429,9 +431,12 @@ export const generateProjectPdfBlob = (data: ExportData, startDate: string, endD
         const totalMinutes = dayEntries.reduce((acc, curr) => {
             if (curr.type === 'break') return acc;
 
-            let dur = calculateDurationInMinutes(curr.start_time || '', curr.end_time || '', 0);
+            let dur = curr.calc_duration_minutes !== undefined
+                ? Math.abs(curr.calc_duration_minutes)
+                : calculateDurationInMinutes(curr.start_time || '', curr.end_time || '', 0);
 
             // Deduct Overlaps with BREAKS
+            // Removed exclusion of 'Pflichtpause (Auto)'
             const breaks = dayEntries.filter(b => b.type === 'break');
             breaks.forEach(b => {
                 const overlap = calculateOverlapInMinutes(curr.start_time || '', curr.end_time || '', b.start_time || '', b.end_time || '');
@@ -658,8 +663,10 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
         const dayEntries = entries.filter(e => e.date === dateStr && e.type !== 'break' && !absenceTypes.includes(e.type || ''));
         const dayHours = dayEntries.reduce((sum, e) => {
             let h = e.hours;
-            // Fallback if hours is NaN (e.g. from old malformed entry)
-            if (isNaN(h)) {
+            // Fallback: Use calc_duration_minutes if available, else hours, else calculate
+            if (e.calc_duration_minutes !== undefined) {
+                h = Math.abs(e.calc_duration_minutes) / 60;
+            } else if (isNaN(h)) {
                 h = calculateDurationInMinutes(e.start_time || '', e.end_time || '', 0) / 60;
             }
 
@@ -845,7 +852,9 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
         // Calculate Day Total for Header (using minutes) - With Overlap Deduction
         const dayTotalMinutes = dayItems.reduce((sum: number, item: any) => {
             if (item.type !== 'break' && !item.isAbsence) {
-                let duration = calculateDurationInMinutes(item.start_time || '', item.end_time || '', 0);
+                let duration = item.calc_duration_minutes !== undefined
+                    ? Math.abs(item.calc_duration_minutes)
+                    : calculateDurationInMinutes(item.start_time || '', item.end_time || '', 0);
 
                 // Deduct Overlaps with BREAKS (New Logic)
                 const breaks = dayItems.filter((b: any) => b.type === 'break');
@@ -899,7 +908,9 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
 
             if (isBreak) {
                 // Calculate break duration
-                durationMin = calculateDurationInMinutes(item.start_time || '', item.end_time || '', 0);
+                durationMin = item.calc_duration_minutes !== undefined
+                    ? Math.abs(item.calc_duration_minutes)
+                    : calculateDurationInMinutes(item.start_time || '', item.end_time || '', 0);
                 label += ` (${durationMin} Min Pause)`;
                 hoursStr = '-'; // Explicitly show - for pause hours as requested
             } else if (item.isAbsence) {
@@ -907,7 +918,9 @@ export const generateMonthlyReportPdfBlob = (data: ExportData, startDate: string
                 hoursStr = formatDuration(item.hours);
             } else {
                 // Work entry
-                durationMin = calculateDurationInMinutes(item.start_time || '', item.end_time || '', 0);
+                durationMin = item.calc_duration_minutes !== undefined
+                    ? Math.abs(item.calc_duration_minutes)
+                    : calculateDurationInMinutes(item.start_time || '', item.end_time || '', 0);
 
                 // Deduct Overlaps with BREAKS (New Logic)
                 const breaks = dayItems.filter(b => b.type === 'break');

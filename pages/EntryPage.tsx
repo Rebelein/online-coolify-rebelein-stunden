@@ -6,7 +6,7 @@ import { GlassCard, GlassInput, GlassButton } from '../components/GlassCard';
 import GlassDatePicker from '../components/GlassDatePicker';
 import { PlusCircle, Save, X, Calendar, ChevronLeft, ChevronRight, Clock, Coffee, Building, Briefcase, Truck, Sun, Heart, AlertCircle, AlertTriangle, CheckCircle, Info, Lock, History, User, FileText, Palmtree, UserX, Copy, Loader2, RefreshCw, Send, ArrowLeft, Trash2, CalendarDays, Plus, ChevronDown, ChevronUp, ArrowRight, MessageSquareText, StickyNote, Building2, Warehouse, Car, Stethoscope, PartyPopper, Ban, TrendingDown, Play, Square, UserCheck, Check, UserPlus, ArrowLeftRight, Baby, Coins, PiggyBank, Siren, Percent, ShieldAlert, Edit2, XCircle, Hash, Users } from 'lucide-react';
 import { TimeSegment, QuotaChangeNotification, TimeEntry, UserAbsence } from '../types';
-import { formatDuration, getGracePeriodDate, formatMinutesToDecimal } from '../services/utils/timeUtils';
+import { formatDuration, getGracePeriodDate, formatMinutesToDecimal, calculateOverlapInMinutes } from '../services/utils/timeUtils';
 import { analyzeMontagebericht, uploadBackupFile } from '../services/pdfImportService';
 
 
@@ -757,12 +757,15 @@ const EntryPage: React.FC = () => {
 
     const handleEndTimeChange = (val: string) => {
         setProjectEndTime(val);
+        // Live calculation on valid input
         if (projectStartTime && val && projectStartTime.includes(':') && val.includes(':')) {
             const diffMins = getMinutesDiff(projectStartTime, val);
             if (diffMins > 0) {
-                setHours((diffMins / 60).toFixed(2));
+                setHours((diffMins / 60).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
             } else {
-                setHours('');
+                // Keep hours if negative/invalid? Or clear? 
+                // Better to clear or do nothing if invalid range to let user fix it.
+                // setHours(''); 
             }
         }
     };
@@ -771,13 +774,20 @@ const EntryPage: React.FC = () => {
         const formatted = formatTimeInput(projectStartTime);
         if (formatted !== projectStartTime) {
             setProjectStartTime(formatted);
-            if (hours) {
-                const h = parseFloat(hours.replace(',', '.'));
+        }
+
+        // Always try to calculate on blur if both are present
+        if (formatted && projectEndTime && projectEndTime.includes(':')) {
+            const diffMins = getMinutesDiff(formatted, projectEndTime);
+            if (diffMins > 0) {
+                setHours((diffMins / 60).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+            }
+        } else if (hours && formatted) {
+            // Inverse: Start + Hours -> End
+            const h = parseFloat(hours.replace(',', '.'));
+            if (!isNaN(h)) {
                 const minutes = Math.round(h * 60);
                 setProjectEndTime(addMinutesToTime(formatted, minutes));
-            } else if (projectEndTime && projectEndTime.includes(':')) {
-                const diffMins = getMinutesDiff(formatted, projectEndTime);
-                if (diffMins > 0) setHours((diffMins / 60).toFixed(2));
             }
         }
     };
@@ -786,9 +796,13 @@ const EntryPage: React.FC = () => {
         const formatted = formatTimeInput(projectEndTime);
         if (formatted !== projectEndTime) {
             setProjectEndTime(formatted);
-            if (projectStartTime && projectStartTime.includes(':')) {
-                const diffMins = getMinutesDiff(projectStartTime, formatted);
-                if (diffMins > 0) setHours((diffMins / 60).toFixed(2));
+        }
+
+        // Always try to calculate on blur if both are present
+        if (projectStartTime && formatted && projectStartTime.includes(':')) {
+            const diffMins = getMinutesDiff(projectStartTime, formatted);
+            if (diffMins > 0) {
+                setHours((diffMins / 60).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
             }
         }
     };
@@ -973,49 +987,13 @@ const EntryPage: React.FC = () => {
         e.preventDefault();
 
         // --- PEER / TEAM ENTRY LOGIC ---
-        if (selectedTeamIds.length > 0) {
-            setIsSubmitting(true);
-            const { data: { user } } = await supabase.auth.getUser();
 
-            let successCount = 0;
-
-            for (const teamUserId of selectedTeamIds) {
-                await addEntry({
-                    date,
-                    client_name: client,
-                    hours: parseFloat(hours.replace(',', '.')),
-                    start_time: projectStartTime || undefined,
-                    end_time: projectEndTime || undefined,
-                    note: note || undefined,
-                    type: entryType,
-                    surcharge: entryType === 'emergency_service' ? surcharge : undefined,
-                    // Proposal Flags
-                    is_proposal: true,
-                    shared_by_user_id: user?.id,
-                    order_number: orderNumber || undefined
-                }, teamUserId);
-                successCount++;
-            }
-
-            setIsSubmitting(false);
-            // Reset UI
-            setSelectedTeamIds([]);
-            setClient('');
-            setHours('');
-            setNote('');
-            setProjectStartTime('');
-            setProjectEndTime('');
-            setOrderNumber('');
-            setProjectEndTime('');
-            setOrderNumber('');
-            setSuccessModal({ isOpen: true, message: `${successCount} Teameinträge als Vorschlag gesendet.` });
-            return;
-            return;
-        }
 
         const isAbsence = ['vacation', 'sick', 'holiday', 'unpaid'].includes(entryType);
 
-        if (!client || (!isAbsence && !hours)) return;
+        // Validierung: Entweder Stunden ODER (Start + Ende) müssen da sein (außer bei Abwesenheiten)
+        const hasTimeRange = projectStartTime && projectEndTime;
+        if (!client || (!isAbsence && !hours && !hasTimeRange)) return;
 
         // Determine Responsible User for Late Entry
         let finalResponsibleUserId = isLateEntry ? undefined : (responsibleUserId || undefined);
@@ -1085,7 +1063,7 @@ const EntryPage: React.FC = () => {
             );
 
             const overlaps = workEntries.map(work => {
-                const mins = calculateOverlap(projectStartTime, projectEndTime, work.start_time!, work.end_time!);
+                const mins = calculateOverlapInMinutes(projectStartTime, projectEndTime, work.start_time!, work.end_time!);
                 return { entry: work, overlapMinutes: mins };
             }).filter(o => o.overlapMinutes > 0);
 
@@ -1123,6 +1101,32 @@ const EntryPage: React.FC = () => {
             } else {
                 // Create new
                 await addEntry(entryData);
+
+                // --- TEAM / PEER ENTRIES (Proposals) ---
+                if (selectedTeamIds.length > 0) {
+                    const { data: { user } } = await supabase.auth.getUser();
+
+                    for (const teamUserId of selectedTeamIds) {
+                        await addEntry({
+                            date: entryData.date,
+                            client_name: entryData.client_name,
+                            hours: entryData.hours,
+                            start_time: entryData.start_time,
+                            end_time: entryData.end_time,
+                            note: entryData.note,
+                            type: entryData.type as any,
+                            surcharge: entryData.surcharge,
+                            order_number: entryData.order_number,
+                            // Proposal Flags
+                            is_proposal: true,
+                            shared_by_user_id: user?.id,
+                            late_reason: undefined, // Proposals don't inherit late reason triggers yet
+                            responsible_user_id: undefined // Peer confirms themselves
+                        }, teamUserId);
+                    }
+                    setSuccessModal({ isOpen: true, message: `Eintrag für dich und ${selectedTeamIds.length} Kollegen erstellt.` });
+                    setSelectedTeamIds([]);
+                }
             }
         }
 
@@ -1147,6 +1151,7 @@ const EntryPage: React.FC = () => {
             const hasBreak = entries.some(e => e.date === date && e.type === 'break' && !e.is_deleted);
 
             // 3. Wenn > 6h und noch keine Pause -> Dummy anlegen
+            /* DISABLED BY USER REQUEST: Allow manual break entry flow
             if (totalHoursDaily > 6 && !hasBreak) {
                 await addEntry({
                     date: date,
@@ -1159,6 +1164,7 @@ const EntryPage: React.FC = () => {
                     submitted: false
                 });
             }
+            */
         }
 
         finishSubmit();
@@ -1188,6 +1194,50 @@ const EntryPage: React.FC = () => {
                 late_reason: entry.late_reason || '' // Allow editing if it was late
             }
         });
+    };
+
+    const handleOverlapConfirm = async () => {
+        setIsSubmitting(true);
+        try {
+            // 1. Reduce overlapped entries
+            for (const { entry, overlapMinutes } of overlapWarning.overlappedEntries) {
+                let newHours = entry.hours;
+                if (entry.calc_duration_minutes) {
+                    const newMins = entry.calc_duration_minutes - overlapMinutes;
+                    newHours = newMins / 60;
+                } else {
+                    newHours = Math.max(0, entry.hours - (overlapMinutes / 60));
+                }
+
+                await updateEntry(entry.id, {
+                    hours: newHours,
+                    // We only update hours (duration), assuming start/end are fixed "Project Times"
+                    // and usage logic handles the deduction visually or logically.
+                    // Ideally we might split the entry, but reducing hours is the requested "Wert bereinigen".
+                });
+            }
+
+            // 2. Create the Break Entry
+            if (overlapWarning.newEntryData) {
+                await addEntry(overlapWarning.newEntryData);
+            }
+
+            setOverlapWarning({ isOpen: false, overlappedEntries: [], newEntryData: null });
+
+            // Reset UI
+            setHours('');
+            setNote('');
+            setProjectStartTime('');
+            setProjectEndTime('');
+            setOrderNumber('');
+            setSuccessModal({ isOpen: true, message: `Pause erledigt & Arbeitszeit angepasst.` });
+
+        } catch (e) {
+            console.error(e);
+            alert("Fehler beim Speichern der Überschneidung.");
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     const handleSaveCorrection = async () => {
@@ -1848,15 +1898,20 @@ const EntryPage: React.FC = () => {
                             <div className="w-24 relative bg-black/20 rounded-xl border border-white/5 flex flex-col justify-center">
                                 <span className="absolute top-1 left-0 w-full text-center text-[9px] text-cyan-400/70 uppercase font-bold tracking-wider">Std</span>
                                 <input
-                                    type="number"
-                                    step="0.01"
-                                    placeholder="0"
+                                    type="text"
+                                    inputMode="decimal"
+                                    placeholder="0,00"
                                     value={hours}
                                     onChange={(e) => handleHoursChange(e.target.value)}
                                     required={!['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay', 'overtime_reduction'].includes(entryType)}
                                     disabled={['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay', 'overtime_reduction'].includes(entryType)}
                                     className="w-full bg-transparent border-none text-center text-cyan-300 font-bold font-mono text-xl h-10 pt-3 focus:outline-none"
                                 />
+                                {/* PREVIEW HELPER */}
+                                {projectStartTime && projectEndTime && !hours && (
+                                    /* Preview Removed as requested */
+                                    null
+                                )}
                             </div>
                         </div>
 
@@ -2014,7 +2069,9 @@ const EntryPage: React.FC = () => {
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex justify-between items-baseline mb-1">
                                                     <h4 className="font-bold text-white text-sm truncate">{entry.client_name}</h4>
-                                                    <span className="font-mono font-bold text-teal-300 text-sm ml-2">{formatDuration(entry.hours)}h</span>
+                                                    <span className="font-mono font-bold text-teal-300 text-sm ml-2">
+                                                        {formatDuration(entry.calc_duration_minutes ? entry.calc_duration_minutes / 60 : entry.hours)}h
+                                                    </span>
                                                 </div>
                                                 <div className="text-xs text-white/40 flex flex-wrap gap-2 mb-1">
                                                     <span>{new Date(entry.date).toLocaleDateString()}</span>
@@ -2052,6 +2109,58 @@ const EntryPage: React.FC = () => {
                 </div>
             </div>
 
+
+            {/* Overlap Warning Modal */}
+            {overlapWarning.isOpen && (
+                <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-300">
+                    <GlassCard className="w-full max-w-lg border-orange-500/50 shadow-2xl shadow-orange-900/20 relative bg-gray-900/95">
+                        <div className="p-6 text-center space-y-6">
+                            <div className="mx-auto w-16 h-16 bg-orange-500/20 rounded-full flex items-center justify-center ring-1 ring-orange-500/50 relative">
+                                <AlertTriangle size={32} className="text-orange-300" />
+                            </div>
+
+                            <div>
+                                <h2 className="text-xl font-bold text-white mb-2">Überschneidung erkannt</h2>
+                                <p className="text-white/60">
+                                    Die eingetragene Pause überschneidet sich mit bestehenden Einträgen.
+                                    Soll die Arbeitszeit der betroffenen Einträge automatisch reduziert werden?
+                                </p>
+                            </div>
+
+                            <div className="bg-white/5 rounded-xl p-4 border border-white/10 space-y-3 max-h-40 overflow-y-auto">
+                                {overlapWarning.overlappedEntries.map((item, idx) => (
+                                    <div key={idx} className="flex justify-between items-center text-sm">
+                                        <div className="flex flex-col text-left">
+                                            <span className="font-bold text-white">{item.entry.client_name}</span>
+                                            <span className="text-white/40 text-xs">
+                                                {item.entry.start_time} - {item.entry.end_time}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-orange-300 font-bold">-{item.overlapMinutes} min</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <button
+                                    onClick={() => setOverlapWarning({ isOpen: false, overlappedEntries: [], newEntryData: null })}
+                                    className="w-full py-3 bg-white/10 hover:bg-white/20 rounded-xl text-white font-bold transition-all"
+                                >
+                                    Abbrechen
+                                </button>
+                                <button
+                                    onClick={handleOverlapConfirm}
+                                    className="w-full py-3 bg-orange-600 hover:bg-orange-500 rounded-xl text-white font-bold transition-all shadow-lg shadow-orange-900/20 active:scale-95"
+                                >
+                                    Bestätigen & Buchen
+                                </button>
+                            </div>
+                        </div>
+                    </GlassCard>
+                </div>
+            )}
 
             {/* Quota Notification Modal */}
             {

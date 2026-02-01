@@ -1,11 +1,11 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { useTimeEntries, useSettings, useDailyLogs, useAbsences, useVacationRequests, getDailyTargetForDate, getLocalISOString, getYearlyQuota } from '../services/dataService';
+import { useTimeEntries, useSettings, useDailyLogs, useAbsences, useVacationRequests, getDailyTargetForDate, getLocalISOString, getYearlyQuota, fetchMonthlyStats, fetchLifetimeStats } from '../services/dataService';
 import { formatDuration } from '../services/utils/timeUtils';
 import { GlassCard, GlassButton, GlassInput } from '../components/GlassCard';
 import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Clock, UserCheck, Palmtree, Stethoscope, Ban, PartyPopper, CalendarHeart, X, CheckCircle, Calendar, CalendarDays, BarChart3, List, Grid3X3, ArrowRight, AlertTriangle, Scale } from 'lucide-react';
 import GlassDatePicker from '../components/GlassDatePicker';
-import { YearlyVacationQuota } from '../types';
+import { YearlyVacationQuota, MonthlyStats, LifetimeStats } from '../types';
 
 type ViewMode = 'month' | 'year' | 'overtime';
 
@@ -247,97 +247,104 @@ const AnalysisPage: React.FC = () => {
     }, [absences, year, settings.target_hours, settings.vacation_days_yearly, settings.vacation_days_carryover, currentYearQuota]);
 
 
-    // --- STATISTICS: MONTH VIEW ---
+    // --- STATISTICS: MONTH VIEW (RPC) ---
+    const [monthRpcStats, setMonthRpcStats] = useState<MonthlyStats>({ target: 0, actual: 0, project_hours: 0, credits: 0, diff: 0 });
+
+    useEffect(() => {
+        const loadMonth = async () => {
+            if (settings.user_id) {
+                const data = await fetchMonthlyStats(settings.user_id, year, month);
+                if (data) setMonthRpcStats(data);
+            }
+        };
+        loadMonth();
+    }, [settings.user_id, year, month, entries, absences]); // Refetch on changes
+
+    // Adapter
     const monthStats = useMemo(() => {
-        const daysInMonth = new Date(year, month + 1, 0).getDate();
-        const startDate = new Date(year, month, 1);
-        const endDate = new Date(year, month, daysInMonth);
-
-        const target = calculateTargetHours(startDate, endDate, absences);
-
-        const projectHours = entries
-            .filter(e => {
-                const d = new Date(e.date);
-                // INCLUDE OVERTIME REDUCTION for "Visual Progress" in month/year stats (treated as "done")
-                const absenceTypes = ['vacation', 'sick', 'holiday', 'special_holiday', 'sick_child', 'sick_pay', 'unpaid'];
-                return d.getFullYear() === year && d.getMonth() === month && e.type !== 'break' && !absenceTypes.includes(e.type || '') && e.date >= effectiveStartDate;
-            })
-            .reduce((sum, e) => sum + e.hours, 0);
-
-        const credits = calculateAbsenceCredits(startDate, endDate, absences);
+        // We still need "attendanceHours" from dailyLogs (Server doesn't have it yet fully aggregated maybe, or we can use local logs)
+        // RPC get_monthly_stats doesn't return attendance.
+        // We keep local attendance calc for now.
         const attendanceHours = dailyLogs
             .filter(l => {
                 const d = new Date(l.date);
-                return d.getFullYear() === year && d.getMonth() === month && l.date >= effectiveStartDate;
+                return d.getFullYear() === year && d.getMonth() === month;
             })
             .reduce((sum, log) => {
-                // simplified logic
                 if (log.start_time && log.end_time) {
                     const st = new Date(`1970-01-01T${log.start_time}`).getTime();
                     const en = new Date(`1970-01-01T${log.end_time}`).getTime();
-
-                    // Subtract breaks
                     const dayBreaks = entries.filter(e => e.date === log.date && e.type === 'break').reduce((sum, b) => sum + b.hours, 0);
-
                     return sum + Math.max(0, ((en - st) / 3600000) - dayBreaks);
                 }
                 return sum;
             }, 0);
 
-        const actualTotal = projectHours + credits;
-        const difference = actualTotal - target;
-
-        return { target, actualTotal, projectHours, credits, attendanceHours, difference };
-    }, [year, month, entries, absences, dailyLogs, settings.target_hours, effectiveStartDate]);
-
-    // --- STATISTICS: YEAR VIEW ---
-    const yearStats = useMemo(() => {
-        const monthsData = [];
-        let yearTarget = 0;
-        let yearActual = 0;
-        let yearAttendance = 0;
-
-        for (let m = 0; m < 12; m++) {
-            const daysInM = new Date(year, m + 1, 0).getDate();
-            const start = new Date(year, m, 1);
-            const end = new Date(year, m, daysInM);
-
-            const mTarget = calculateTargetHours(start, end, absences);
-
-            const mProjects = entries
-                .filter(e => {
-                    const d = new Date(e.date);
-                    // INCLUDE OVERTIME REDUCTION for Year Progress (treated as "done")
-                    const absenceTypes = ['vacation', 'sick', 'holiday', 'special_holiday', 'sick_child', 'sick_pay', 'unpaid'];
-                    return d.getFullYear() === year && d.getMonth() === m && e.type !== 'break' && !absenceTypes.includes(e.type || '') && e.date >= effectiveStartDate;
-                })
-                .reduce((sum, e) => sum + e.hours, 0);
-
-            const mCredits = calculateAbsenceCredits(start, end, absences);
-            const mActual = mProjects + mCredits;
-
-            yearTarget += mTarget;
-            yearActual += mActual;
-
-            monthsData.push({
-                monthIndex: m,
-                target: mTarget,
-                actual: mActual,
-                diff: mActual - mTarget
-            });
-        }
-
         return {
-            yearTarget,
-            yearActual,
-            yearAttendance,
-            difference: yearActual - yearTarget,
-            monthsData
+            target: monthRpcStats.target,
+            actualTotal: monthRpcStats.actual,
+            projectHours: monthRpcStats.project_hours,
+            credits: monthRpcStats.credits,
+            attendanceHours,
+            difference: monthRpcStats.diff
         };
-    }, [year, entries, absences, dailyLogs, settings.target_hours, effectiveStartDate]);
+    }, [monthRpcStats, dailyLogs, entries, year, month]);
 
+    // --- STATISTICS: YEAR VIEW (RPC) ---
+    const [yearRpcStats, setYearRpcStats] = useState<{
+        yearTarget: number;
+        yearActual: number;
+        yearAttendance: number;
+        difference: number;
+        monthsData: any[];
+    }>({ yearTarget: 0, yearActual: 0, yearAttendance: 0, difference: 0, monthsData: [] });
 
-    // --- TREND LOGIC ---
+    useEffect(() => {
+        const loadYear = async () => {
+            if (!settings.user_id) return;
+
+            const promises = [];
+            for (let m = 0; m < 12; m++) {
+                promises.push(fetchMonthlyStats(settings.user_id, year, m));
+            }
+
+            const results = await Promise.all(promises);
+            // results is array of MonthlyStats (or null)
+
+            let yTarget = 0;
+            let yActual = 0;
+            const yMonthsData: any[] = [];
+
+            results.forEach((res, index) => {
+                if (res) {
+                    yTarget += res.target;
+                    yActual += res.actual;
+                    yMonthsData.push({
+                        monthIndex: index,
+                        target: res.target,
+                        actual: res.actual,
+                        diff: res.diff
+                    });
+                } else {
+                    yMonthsData.push({ monthIndex: index, target: 0, actual: 0, diff: 0 });
+                }
+            });
+
+            setYearRpcStats({
+                yearTarget: yTarget,
+                yearActual: yActual,
+                yearAttendance: 0, // Not fetching attendance from server yet
+                difference: yActual - yTarget,
+                monthsData: yMonthsData
+            });
+        };
+        loadYear();
+    }, [settings.user_id, year, entries, absences]);
+
+    const yearStats = yearRpcStats;
+
+    // --- TREND LOGIC (Hybrid/Client) ---
+    // Trend view needs variable dates. Without a specific RPC, we keep client logic or use a mix.
     const trendStats = useMemo(() => {
         const todayStr = getLocalISOString();
         const limitDateStr = lastEntryDate > todayStr ? todayStr : lastEntryDate;
@@ -364,7 +371,20 @@ const AnalysisPage: React.FC = () => {
                 const absenceTypes = ['vacation', 'sick', 'holiday', 'special_holiday', 'sick_child', 'sick_pay', 'unpaid'];
                 return e.date >= startStr && e.date <= limitDateStr && e.type !== 'break' && e.type !== 'overtime_reduction' && !absenceTypes.includes(e.type || '') && e.date >= effectiveStartDate;
             })
-            .reduce((sum, e) => sum + e.hours, 0);
+            .reduce((sum, e) => {
+                let h = 0;
+                if (e.calc_duration_minutes !== undefined) {
+                    h = Math.abs(e.calc_duration_minutes) / 60;
+                    if (e.type === 'emergency_service') {
+                        if (e.calc_surcharge_hours !== undefined) h += e.calc_surcharge_hours;
+                        else if (e.surcharge) h *= (1 + e.surcharge / 100);
+                    }
+                } else {
+                    h = e.hours;
+                    if (e.type === 'emergency_service' && e.surcharge) h *= (1 + e.surcharge / 100);
+                }
+                return sum + h;
+            }, 0);
 
         const credits = calculateAbsenceCredits(startDate, limitDate, absences);
         const actual = projectHours + credits;
@@ -380,99 +400,29 @@ const AnalysisPage: React.FC = () => {
     }, [viewMode, year, month, entries, absences, lastEntryDate, effectiveStartDate]);
 
     // --- LIFETIME BALANCE ---
-    const totalBalanceStats = useMemo(() => {
-        let startStr = settings.employment_start_date;
-        if (!startStr && entries.length > 0) {
-            const sortedEntries = [...entries].sort((a, b) => a.date.localeCompare(b.date));
-            startStr = sortedEntries[0].date;
-        }
-        if (!startStr) startStr = getLocalISOString();
+    // --- LIFETIME BALANCE (RPC) ---
+    const [lifetimeStats, setLifetimeStats] = useState<LifetimeStats>({ target: 0, actual: 0, diff: 0, start_date: '', cutoff_date: '' });
 
-        const todayStr = getLocalISOString();
-
-        if (startStr > todayStr) return { target: 0, actual: 0, diff: 0, startStr, cutoffStr: null };
-
-        // CUTOFF: Last Submitted Entry ONLY (Do not extend for overtime_reduction)
-        const submittedEntries = entries.filter(e => e.submitted && e.date <= todayStr);
-        const lastSubmittedEntry = submittedEntries.sort((a, b) => b.date.localeCompare(a.date))[0];
-
-        // If no submitted entry exists, we calculate nothing or just start
-        if (!lastSubmittedEntry) {
-            return { target: 0, actual: 0, diff: 0, startStr, cutoffStr: null };
-        }
-
-        let cutoffDateStr = lastSubmittedEntry.date;
-        if (cutoffDateStr < startStr) cutoffDateStr = startStr;
-
-        let totalTarget = 0;
-        let totalCredits = 0;
-
-        let curr = new Date(startStr);
-        curr.setHours(12, 0, 0, 0);
-        const end = new Date(cutoffDateStr);
-        end.setHours(12, 0, 0, 0);
-
-        while (curr.getTime() <= end.getTime()) {
-            const dateStr = getLocalISOString(curr);
-
-            const dailyTarget = getDailyTargetForDate(dateStr, settings.target_hours);
-
-            const absence = absences.find(a => dateStr >= a.start_date && dateStr <= a.end_date);
-            const entryAbsence = entries.find(e => e.date === dateStr && ['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay'].includes(e.type || ''));
-
-            let isUnpaid = false;
-            let isPaidAbsence = false;
-
-            if (absence) {
-                if (absence.type === 'unpaid' || absence.type === 'sick_child' || absence.type === 'sick_pay') isUnpaid = true;
-                else isPaidAbsence = true;
-            } else if (entryAbsence) {
-                if (entryAbsence.type === 'unpaid' || entryAbsence.type === 'sick_child' || entryAbsence.type === 'sick_pay') isUnpaid = true;
-                else isPaidAbsence = true;
+    useEffect(() => {
+        const loadLifetime = async () => {
+            if (settings.user_id) {
+                const data = await fetchLifetimeStats(settings.user_id);
+                if (data) setLifetimeStats(data);
             }
-
-            if (!isUnpaid) {
-                totalTarget += dailyTarget;
-                if (isPaidAbsence) {
-                    totalCredits += dailyTarget;
-                }
-            }
-
-            curr.setDate(curr.getDate() + 1);
-        }
-
-        const projectHours = entries
-            .filter(e => {
-                // EXCLUDE overtime_reduction from "Actuals" so it reduces the balance
-                // ALSO exclude explicitly absence types if they were logged as entries
-                return e.date >= startStr &&
-                    e.date <= cutoffDateStr &&
-                    !['break', 'vacation', 'sick', 'holiday', 'unpaid', 'overtime_reduction', 'sick_child', 'sick_pay'].includes(e.type || '');
-            })
-            .reduce((sum, e) => sum + e.hours, 0);
-
-        // FUTURE OVERTIME REDUCTION
-        // Check for any CONFIRMED overtime_reduction entries AFTER the cutoff date
-        const futureReductions = entries
-            .filter(e => {
-                return e.type === 'overtime_reduction' &&
-                    e.confirmed_at && // Must be confirmed by office
-                    e.date > cutoffDateStr; // Only count those strictly AFTER the normal calculation period
-            })
-            .reduce((sum, e) => sum + e.hours, 0);
-
-        // ADD INITIAL BALANCE
-        const initialBalance = settings.initial_overtime_balance || 0;
-
-        return {
-            target: totalTarget,
-            actual: projectHours + totalCredits,
-            diff: (projectHours + totalCredits) - totalTarget - futureReductions + initialBalance,
-            startStr,
-            cutoffStr: cutoffDateStr
         };
+        loadLifetime();
+    }, [settings.user_id, entries, absences]);
 
-    }, [settings, entries, absences]);
+    // Adapter for UI
+    const totalBalanceStats = useMemo(() => {
+        return {
+            target: lifetimeStats.target,
+            actual: lifetimeStats.actual,
+            diff: lifetimeStats.diff,
+            startStr: lifetimeStats.start_date,
+            cutoffStr: lifetimeStats.cutoff_date
+        };
+    }, [lifetimeStats]);
 
 
     // --- GRID DATA ---
@@ -520,8 +470,35 @@ const AnalysisPage: React.FC = () => {
             const dayEntries = entries.filter(e => e.date === dateStr && e.type !== 'break' && e.type !== 'special_holiday');
 
             // Calculate stats
-            const totalHours = dayEntries.reduce((sum, e) => sum + e.hours, 0); // Includes Overtime Reduction!
-            const workHours = dayEntries.filter(e => e.type !== 'overtime_reduction').reduce((sum, e) => sum + e.hours, 0);
+            const totalHours = dayEntries.reduce((sum, e) => {
+                let h = 0;
+                if (e.calc_duration_minutes !== undefined) {
+                    h = Math.abs(e.calc_duration_minutes) / 60;
+                    if (e.type === 'emergency_service') {
+                        if (e.calc_surcharge_hours !== undefined) h += e.calc_surcharge_hours;
+                        else if (e.surcharge) h *= (1 + e.surcharge / 100);
+                    }
+                } else {
+                    h = e.hours;
+                    if (e.type === 'emergency_service' && e.surcharge) h *= (1 + e.surcharge / 100);
+                }
+                return sum + h;
+            }, 0); // Includes Overtime Reduction!
+
+            const workHours = dayEntries.filter(e => e.type !== 'overtime_reduction').reduce((sum, e) => {
+                let h = 0;
+                if (e.calc_duration_minutes !== undefined) {
+                    h = Math.abs(e.calc_duration_minutes) / 60;
+                    if (e.type === 'emergency_service') {
+                        if (e.calc_surcharge_hours !== undefined) h += e.calc_surcharge_hours;
+                        else if (e.surcharge) h *= (1 + e.surcharge / 100);
+                    }
+                } else {
+                    h = e.hours;
+                    if (e.type === 'emergency_service' && e.surcharge) h *= (1 + e.surcharge / 100);
+                }
+                return sum + h;
+            }, 0);
             const hasReduction = dayEntries.some(e => e.type === 'overtime_reduction');
 
             const target = getDailyTargetForDate(dateStr, settings.target_hours);

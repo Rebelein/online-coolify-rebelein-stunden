@@ -11,8 +11,12 @@ import {
     Lock, Unlock, Edit2, RotateCcw, Scale, Calculator, CalendarHeart, Stethoscope, UserCheck, Ban, Info, XCircle, History as HistoryIcon,
     Printer, StickyNote, CheckCircle, TrendingUp, ChevronDown, ChevronUp, CalendarCheck, ShieldAlert, List, Hash
 } from 'lucide-react';
-import { useTimeEntries, useDailyLogs, useOfficeService, useAbsences, useVacationRequests, getDailyTargetForDate, getLocalISOString, useSettings, useDepartments, useOvertimeBalance } from '../services/dataService';
-import { TimeEntry, UserAbsence, VacationRequest } from '../types';
+import {
+    useTimeEntries, useDailyLogs, useOfficeService, useAbsences, useVacationRequests,
+    getLocalISOString, useSettings, useDepartments, useOvertimeBalance, fetchDailySummaries,
+    fetchLifetimeStats, fetchMonthlyStats, getDailyTargetForDate
+} from '../services/dataService';
+import { TimeEntry, UserAbsence, VacationRequest, DailySummary, LifetimeStats, MonthlyStats } from '../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import GlassDatePicker from '../components/GlassDatePicker';
@@ -204,6 +208,21 @@ const OfficeUserPage: React.FC = () => {
         setAnalysisEnd(getLocalISOString(end));
     }, []);
 
+    // --- Server-Side Data Fetching ---
+    const [dailySummaries, setDailySummaries] = useState<DailySummary[]>([]);
+
+    useEffect(() => {
+        const loadSummaries = async () => {
+            if (userId) {
+                const year = selectedMonth.getFullYear();
+                const month = selectedMonth.getMonth();
+                const data = await fetchDailySummaries(userId, month, year);
+                setDailySummaries(data || []);
+            }
+        };
+        loadSummaries();
+    }, [userId, selectedMonth]);
+
     // --- Calculations ---
     const year = selectedMonth.getFullYear();
     const month = selectedMonth.getMonth();
@@ -259,108 +278,61 @@ const OfficeUserPage: React.FC = () => {
 
     // --- LIFETIME BALANCE LOGIC ---
 
-    const totalBalanceStats = useMemo(() => {
-        if (!currentUser) return { target: 0, actual: 0, diff: 0, startStr: '' };
+    // --- SERVER-SIDE CALCULATIONS ---
 
-        let startStr = currentUser.employment_start_date;
-        if (!startStr && entries.length > 0) {
-            const sortedEntries = [...entries].sort((a, b) => a.date.localeCompare(b.date));
-            startStr = sortedEntries[0].date;
-        }
-        if (!startStr) startStr = getLocalISOString();
+    // 1. Lifetime Stats (Balance)
+    const [lifetimeStats, setLifetimeStats] = useState<LifetimeStats>({ target: 0, actual: 0, diff: 0, start_date: '', cutoff_date: '' });
 
-        const todayStr = getLocalISOString();
-
-        if (startStr > todayStr) return { target: 0, actual: 0, diff: 0, startStr };
-
-        // CUTOFF: Submitted regular entries only (ignore overtime_reduction for cutoff to not extend range artificially)
-        // Also exclude DELETED entries from defining the range
-        const relevantEntries = entries.filter(e => e.submitted && e.date <= todayStr && !e.is_deleted && !e.deleted_at);
-        const lastRelevantEntry = relevantEntries.sort((a, b) => b.date.localeCompare(a.date))[0];
-
-        if (!lastRelevantEntry) {
-            return { target: 0, actual: 0, diff: 0, startStr, cutoffStr: null };
-        }
-
-        let cutoffDateStr = lastRelevantEntry.date;
-        if (cutoffDateStr < startStr) cutoffDateStr = startStr;
-
-        let totalTarget = 0;
-        let totalCredits = 0;
-
-        let curr = new Date(startStr);
-        curr.setHours(12, 0, 0, 0);
-        const end = new Date(cutoffDateStr);
-        end.setHours(12, 0, 0, 0);
-
-        // Fallback targets from user settings
-        const currentTargets = currentUser.target_hours || {};
-
-        while (curr.getTime() <= end.getTime()) {
-            const dateStr = getLocalISOString(curr);
-
-            // Simplified Target Calculation (No History)
-            const dailyTarget = getDailyTargetForDate(dateStr, currentTargets);
-
-            const absence = absences.find(a => dateStr >= a.start_date && dateStr <= a.end_date);
-            const entryAbsence = entries.find(e => e.date === dateStr && ['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay'].includes(e.type || ''));
-
-            let isUnpaid = false;
-            let isPaidAbsence = false;
-
-            if (absence) {
-                if (absence.type === 'unpaid' || absence.type === 'sick_child' || absence.type === 'sick_pay') isUnpaid = true;
-                else isPaidAbsence = true;
-            } else if (entryAbsence) {
-                if (entryAbsence.type === 'unpaid' || entryAbsence.type === 'sick_child' || entryAbsence.type === 'sick_pay') isUnpaid = true;
-                else isPaidAbsence = true;
+    useEffect(() => {
+        const loadLifetime = async () => {
+            if (userId) {
+                // Determine user start date for context if needed, but RPC handles it.
+                // Re-fetch when entries change to keep in sync
+                const data = await fetchLifetimeStats(userId);
+                if (data) setLifetimeStats(data);
             }
-
-            if (!isUnpaid) {
-                totalTarget += dailyTarget;
-                if (isPaidAbsence) {
-                    totalCredits += dailyTarget;
-                }
-            }
-            curr.setDate(curr.getDate() + 1);
-        }
-
-        const projectHours = entries
-            .filter(e => {
-                // EXCLUDE overtime_reduction from "Actuals" so it reduces the balance
-                return e.date >= startStr &&
-                    e.date <= cutoffDateStr &&
-                    !['break', 'vacation', 'sick', 'holiday', 'unpaid', 'overtime_reduction'].includes(e.type || '') &&
-                    !e.is_deleted && !e.deleted_at;
-            })
-            .reduce((sum, e) => sum + e.hours, 0);
-
-        // FUTURE OVERTIME REDUCTION
-        // Check for any CONFIRMED overtime_reduction entries AFTER the cutoff date
-        const futureReductions = entries
-            .filter(e => {
-                return e.type === 'overtime_reduction' &&
-                    e.confirmed_at && // Must be confirmed by office
-                    !e.is_deleted && !e.deleted_at &&
-                    e.date > cutoffDateStr; // Only count those strictly AFTER the normal calculation period
-            })
-            .reduce((sum, e) => sum + e.hours, 0);
-
-        // ADD INITIAL BALANCE
-        const initialBalance = currentUser.initial_overtime_balance || 0;
-
-        return {
-            target: totalTarget,
-            actual: projectHours + totalCredits,
-            diff: (projectHours + totalCredits) - totalTarget - futureReductions + initialBalance,
-            startStr,
-            cutoffStr: cutoffDateStr
         };
+        loadLifetime();
+        // Trigger reload when entries change (e.g. after edit/add)
+    }, [userId, entries, absences]); // Absences also affect balance
 
-    }, [currentUser, entries, absences]);
+    // Adapter for UI to keep "totalBalanceStats" naming
+    const totalBalanceStats = useMemo(() => {
+        return {
+            target: lifetimeStats.target,
+            actual: lifetimeStats.actual, // RPC returns "actual" as total effective work + credits
+            diff: lifetimeStats.diff,
+            startStr: lifetimeStats.start_date,
+            cutoffStr: lifetimeStats.cutoff_date && lifetimeStats.cutoff_date >= lifetimeStats.start_date ? lifetimeStats.cutoff_date : null
+        };
+    }, [lifetimeStats]);
 
 
-    // --- ABSENCE ANALYSIS ---
+    // 2. Monthly Stats
+    const [monthlyRpcStats, setMonthlyRpcStats] = useState<MonthlyStats>({ target: 0, actual: 0, project_hours: 0, credits: 0, diff: 0 });
+
+    useEffect(() => {
+        const loadMonthly = async () => {
+            if (userId) {
+                const year = selectedMonth.getFullYear();
+                const month = selectedMonth.getMonth();
+                const data = await fetchMonthlyStats(userId, year, month);
+                if (data) setMonthlyRpcStats(data);
+            }
+        };
+        loadMonthly();
+    }, [userId, selectedMonth, entries, absences]);
+
+    // Adapter for UI
+    const monthlyStats = useMemo(() => {
+        return {
+            target: monthlyRpcStats.target,
+            actual: monthlyRpcStats.actual,
+            diff: monthlyRpcStats.diff
+        };
+    }, [monthlyRpcStats]);
+
+    // --- ABSENCE ANALYSIS (Client-side helper) ---
     const unpaidDaysInYear = useMemo(() => {
         if (!absences) return 0;
         return absences
@@ -381,7 +353,7 @@ const OfficeUserPage: React.FC = () => {
             }, 0);
     }, [absences, vacationViewYear]);
 
-    // --- MONTHLY ATTENDANCE CALCULATION ---
+    // --- MONTHLY ATTENDANCE CALCULATION (Client-side helper) ---
     const monthlyAttendance = useMemo(() => {
         let total = 0;
         const startOfMonth = new Date(year, month, 1);
@@ -397,9 +369,9 @@ const OfficeUserPage: React.FC = () => {
                 const start = new Date(`2000-01-01T${log.start_time} `);
                 const end = new Date(`2000-01-01T${log.end_time} `);
                 let duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-                if (duration < 0) duration += 24; // Handle over midnight if needed (though unlikely for daily log structure)
+                if (duration < 0) duration += 24;
 
-                // Subtract breaks for this day (exclude deleted breaks)
+                // Subtract breaks 
                 const dayBreaks = entries.filter(e => e.date === log.date && e.type === 'break' && !e.is_deleted && !e.deleted_at)
                     .reduce((sum, b) => sum + b.hours, 0);
 
@@ -409,66 +381,6 @@ const OfficeUserPage: React.FC = () => {
 
         return total;
     }, [dailyLogs, entries, year, month]);
-
-    // --- MONTHLY BALANCE STATISTICS (Requested Feature) ---
-    const monthlyStats = useMemo(() => {
-        if (!currentUser) return { target: 0, actual: 0, diff: 0 };
-
-        const startOfMonth = new Date(year, month, 1);
-        const endOfMonth = new Date(year, month + 1, 0);
-
-        let totalTarget = 0;
-        let totalCredits = 0;
-        let projectHours = 0;
-
-        // Iterate days
-        let curr = new Date(startOfMonth);
-        while (curr <= endOfMonth) {
-            const dateStr = getLocalISOString(curr);
-            const dailyTarget = getDailyTargetForDate(dateStr, currentUser.target_hours || {});
-
-            // Check Absences
-            const absence = absences?.find(a => dateStr >= a.start_date && dateStr <= a.end_date);
-            const entryAbsence = entries.find(e => e.date === dateStr && ['vacation', 'sick', 'holiday', 'unpaid', 'sick_child', 'sick_pay'].includes(e.type || ''));
-
-            let isUnpaid = false;
-            let isPaidAbsence = false;
-
-            if (absence) {
-                if (absence.type === 'unpaid' || absence.type === 'sick_child' || absence.type === 'sick_pay') isUnpaid = true;
-                else isPaidAbsence = true;
-            } else if (entryAbsence) {
-                if (entryAbsence.type === 'unpaid' || entryAbsence.type === 'sick_child' || entryAbsence.type === 'sick_pay') isUnpaid = true;
-                else isPaidAbsence = true;
-            }
-
-            if (!isUnpaid) {
-                totalTarget += dailyTarget;
-                if (isPaidAbsence) {
-                    totalCredits += dailyTarget;
-                }
-            }
-            curr.setDate(curr.getDate() + 1);
-        }
-
-        // Sum Project Hours for this month
-        projectHours = entries
-            .filter(e => {
-                const [y, m] = e.date.split('-').map(Number);
-                return y === year && m === month + 1 &&
-                    !['break', 'vacation', 'sick', 'holiday', 'unpaid', 'overtime_reduction'].includes(e.type || '') &&
-                    !e.is_deleted && !e.deleted_at;
-            })
-            .reduce((sum, e) => sum + e.hours, 0);
-
-        const actualTotal = projectHours + totalCredits;
-
-        return {
-            target: totalTarget,
-            actual: actualTotal,
-            diff: actualTotal - totalTarget
-        };
-    }, [currentUser, year, month, entries, absences]);
 
     const effectiveVacationClaim = useMemo(() => {
         const base = vacationDaysEdit || 30;
@@ -1902,7 +1814,19 @@ const OfficeUserPage: React.FC = () => {
                         const workEntries = dayEntries.filter(e => e.type !== 'break');
                         const breakEntries = dayEntries.filter(e => e.type === 'break');
 
-                        let workSum = workEntries.reduce((acc, e) => acc + (isNaN(e.hours) ? 0 : e.hours), 0);
+                        let workSum = workEntries.reduce((acc, e) => {
+                            const duration = e.calc_duration_minutes !== undefined
+                                ? e.calc_duration_minutes / 60
+                                : (isNaN(e.hours) ? 0 : e.hours);
+                            const surcharge = e.calc_surcharge_hours || 0;
+
+                            // If user manually entered surcharge via percentage but calc_surcharge_hours is missing (offline/legacy),
+                            // try to estimate it? No, rely on server. 
+                            // Fallback: If calc_surcharge_hours is 0 but we have e.surcharge > 0 and e.hours > 0...
+                            // But usually, clean data has calc fields.
+
+                            return acc + duration + surcharge;
+                        }, 0);
 
                         // Deduct overlaps
                         let overlapDeduction = 0;
@@ -2090,7 +2014,9 @@ const OfficeUserPage: React.FC = () => {
                                 {modalEntries.map(entry => {
                                     const isDeleted = entry.is_deleted || entry.deleted_at;
                                     // Calculate Net Hours for Display (Deduct Overlaps)
-                                    let displayHours = isNaN(entry.hours) ? 0 : entry.hours;
+                                    let displayHours = entry.calc_duration_minutes
+                                        ? entry.calc_duration_minutes / 60
+                                        : (isNaN(entry.hours) ? 0 : entry.hours);
                                     let deduction = 0;
                                     if (entry.type !== 'break' && !isDeleted) {
                                         const breaks = modalEntries.filter(b => b.type === 'break' && !b.is_deleted && !b.deleted_at);
@@ -2137,11 +2063,45 @@ const OfficeUserPage: React.FC = () => {
                                                         <div className="grid grid-cols-2 gap-2">
                                                             <div>
                                                                 <label className="text-[10px] text-white/40 uppercase font-bold mb-1 block">Start</label>
-                                                                <GlassInput type="time" value={editForm.start_time} onChange={e => setEditForm({ ...editForm, start_time: e.target.value })} className="!py-2 !text-sm text-center" />
+                                                                <GlassInput
+                                                                    type="time"
+                                                                    value={editForm.start_time}
+                                                                    onChange={e => {
+                                                                        const val = e.target.value;
+                                                                        let newHours = editForm.hours;
+                                                                        // Auto-Calc Hours
+                                                                        if (val && editForm.end_time) {
+                                                                            const d1 = new Date(`2000-01-01T${val}`);
+                                                                            const d2 = new Date(`2000-01-01T${editForm.end_time}`);
+                                                                            if (!isNaN(d1.getTime()) && !isNaN(d2.getTime()) && d2 > d1) {
+                                                                                newHours = ((d2.getTime() - d1.getTime()) / (1000 * 60 * 60)).toFixed(2);
+                                                                            }
+                                                                        }
+                                                                        setEditForm({ ...editForm, start_time: val, hours: newHours });
+                                                                    }}
+                                                                    className="!py-2 !text-sm text-center"
+                                                                />
                                                             </div>
                                                             <div>
                                                                 <label className="text-[10px] text-white/40 uppercase font-bold mb-1 block">Ende</label>
-                                                                <GlassInput type="time" value={editForm.end_time} onChange={e => setEditForm({ ...editForm, end_time: e.target.value })} className="!py-2 !text-sm text-center" />
+                                                                <GlassInput
+                                                                    type="time"
+                                                                    value={editForm.end_time}
+                                                                    onChange={e => {
+                                                                        const val = e.target.value;
+                                                                        let newHours = editForm.hours;
+                                                                        // Auto-Calc Hours
+                                                                        if (editForm.start_time && val) {
+                                                                            const d1 = new Date(`2000-01-01T${editForm.start_time}`);
+                                                                            const d2 = new Date(`2000-01-01T${val}`);
+                                                                            if (!isNaN(d1.getTime()) && !isNaN(d2.getTime()) && d2 > d1) {
+                                                                                newHours = ((d2.getTime() - d1.getTime()) / (1000 * 60 * 60)).toFixed(2);
+                                                                            }
+                                                                        }
+                                                                        setEditForm({ ...editForm, end_time: val, hours: newHours });
+                                                                    }}
+                                                                    className="!py-2 !text-sm text-center"
+                                                                />
                                                             </div>
                                                         </div>
                                                     </div>

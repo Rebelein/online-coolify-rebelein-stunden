@@ -1,6 +1,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
-import { TimeEntry, UserSettings, DEFAULT_SETTINGS, DailyLog, LockedDay, UserAbsence, VacationRequest, DailyTarget, EntryChangeHistory, Department, OvertimeBalanceEntry } from '../types';
+import { TimeEntry, UserSettings, DEFAULT_SETTINGS, DailyLog, LockedDay, UserAbsence, VacationRequest, DailyTarget, EntryChangeHistory, Department, OvertimeBalanceEntry, DailySummary } from '../types';
 import { supabase } from './supabaseClient';
 import { calculateWorkingDays, calculateWorkingDaysWithHolidays } from './utils/timeUtils';
 
@@ -54,6 +54,66 @@ export const getYearlyQuota = async (userId: string, year: number) => {
     .maybeSingle();
 
   if (error || !data) return null;
+  return data;
+};
+
+/**
+ * Fetches daily summaries from the server-side view.
+ */
+export const fetchDailySummaries = async (userId: string, month: number, year: number) => {
+  // Construct date range for the month
+  const startDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+
+  // Correctly calculate last day of the month
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const endDate = `${year}-${String(month + 1).padStart(2, '0')}-${lastDay}`;
+
+  const { data, error } = await supabase
+    .from('view_daily_summary')
+    .select('*')
+    .eq('user_id', userId)
+    .gte('date', startDate)
+    .lte('date', endDate);
+
+  if (error) {
+    console.error('Error fetching daily summaries:', error);
+    return [];
+  }
+  return data;
+};
+
+/**
+ * Fetches lifetime stats via RPC.
+ */
+export const fetchLifetimeStats = async (userId: string) => {
+  const { data, error } = await supabase.rpc('get_lifetime_stats', { p_user_id: userId });
+  if (error) {
+    console.error('Error fetching lifetime stats:', error);
+    return null;
+  }
+  return data;
+};
+
+/**
+ * Fetches monthly stats via RPC.
+ * Month is 0-indexed (0=Jan) to match JS Date.
+ */
+export const fetchMonthlyStats = async (userId: string, year: number, month: number) => {
+  // RPC expects 1-based month if we follow standard SQL, but let's check implementation.
+  // SQL: MAKE_DATE(p_year, p_month, 1) -> input is used as Month.
+  // If we pass 0, MAKE_DATE might fail or go to previous year?
+  // Postgres MAKE_DATE(year, month, day): month is integer 1-12.
+  // So we MUST pass month + 1.
+  const { data, error } = await supabase.rpc('get_monthly_stats', {
+    p_user_id: userId,
+    p_year: year,
+    p_month: month + 1
+  });
+
+  if (error) {
+    console.error('Error fetching monthly stats:', error);
+    return null;
+  }
   return data;
 };
 
@@ -1604,16 +1664,29 @@ export const useOvertimeBalance = (userId: string) => {
   return { entries, loading, addEntry, refresh: fetchEntries };
 };
 
-export const useDashboardStats = () => {
+export const useDashboardStats = (userId?: string, role?: string) => {
   const [stats, setStats] = useState<{ totalCount: number, loading: boolean }>({ totalCount: 0, loading: true });
 
   const fetchStats = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    // If no user/role provided, try to fetch (fallback)
+    let currentUserId = userId;
+    let currentUserRole = role;
 
-    const { data: userSettings } = await supabase.from('user_settings').select('role').eq('user_id', user.id).single();
-    const role = userSettings?.role || 'installer';
-    const isOfficeOrAdmin = role === 'admin' || role === 'office';
+    if (!currentUserId) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      currentUserId = user.id;
+    }
+
+    if (!currentUserRole && currentUserId) {
+      const { data: userSettings } = await supabase.from('user_settings').select('role').eq('user_id', currentUserId).single();
+      currentUserRole = userSettings?.role || 'installer';
+    }
+
+    const isOfficeOrAdmin = currentUserRole === 'admin' || currentUserRole === 'office';
+    if (!currentUserId) return;
+
+    // console.log("Fetching Dashboard Stats for", currentUserId, currentUserRole);
 
     let total = 0;
 
@@ -1621,9 +1694,9 @@ export const useDashboardStats = () => {
     const { count: myChangesCount } = await supabase
       .from('time_entries')
       .select('*', { count: 'exact', head: true })
-      .eq('user_id', user.id)
+      .eq('user_id', currentUserId)
       .eq('change_confirmed_by_user', false)
-      .neq('last_changed_by', user.id);
+      .neq('last_changed_by', currentUserId);
 
     total += (myChangesCount || 0);
 
@@ -1639,7 +1712,10 @@ export const useDashboardStats = () => {
         const confirmationTypes = ['company', 'office', 'warehouse', 'car', 'overtime_reduction'];
         const actionable = unconfirmed.filter(e => {
           const isApprovalType = (confirmationTypes.includes(e.type || '') && !e.late_reason);
-          const isAssigned = !!e.responsible_user_id;
+          const isAssigned = !!e.responsible_user_id; // Check if assigned to ANYONE (Logic might need refinement if assigned to SPECIFIC user)
+          // Refined Logic based on OfficeDashboard:
+          // We count ALL unassigned actionable items + items assigned to ME?
+          // For simplistic Badge Count: Count ALL actionable items visible to Admin/Office.
           const isLate = !!e.late_reason;
           return isApprovalType || isAssigned || isLate;
         });
@@ -1656,14 +1732,22 @@ export const useDashboardStats = () => {
     }
 
     setStats({ totalCount: total, loading: false });
-  }, []);
+  }, [userId, role]);
 
   useEffect(() => {
     fetchStats();
 
-    const channel = supabase.channel('dashboard_stats')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'time_entries' }, () => fetchStats())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vacation_requests' }, () => fetchStats())
+    // Use a unique channel name to prevent collisions/zombie channels
+    const channelName = `dashboard_stats_${Math.random()}`;
+    const channel = supabase.channel(channelName)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'time_entries' }, (payload) => {
+        // console.log("Realtime Stats Update (TimeEntry):", payload);
+        fetchStats();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vacation_requests' }, (payload) => {
+        // console.log("Realtime Stats Update (Vacation):", payload);
+        fetchStats();
+      })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };

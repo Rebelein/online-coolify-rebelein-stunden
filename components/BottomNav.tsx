@@ -8,7 +8,7 @@ const BottomNav: React.FC = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const { settings, logout } = useSettings();
-    const { totalCount } = useDashboardStats();
+    const { totalCount } = useDashboardStats(settings.user_id, settings.role);
 
     // SIDEBAR EXPANSION STATE (PERSISTED)
     const [isExpanded, setIsExpanded] = React.useState(() => {

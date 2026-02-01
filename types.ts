@@ -42,6 +42,21 @@ export interface TimeEntry {
   change_reason?: string;
   change_confirmed_by_user?: boolean; // New: If false, user needs to confirm change
   has_history?: boolean; // New: If true, entry has history records
+  // Server-Side Calculated Fields (Read-Only)
+  calc_duration_minutes?: number;
+  calc_surcharge_hours?: number;
+  calc_is_late_entry?: boolean;
+}
+
+export interface DailySummary {
+  user_id: string;
+  date: string;
+  total_work_minutes: number;
+  vacation_hours: number;
+  sick_hours: number;
+  holiday_hours: number;
+  total_surcharge_hours: number;
+  total_effective_minutes?: number; // New server-side calculation
 }
 
 export interface TimeSegment {
@@ -222,11 +237,11 @@ export const DEFAULT_SETTINGS: UserSettings = {
   display_name: "Benutzer",
   role: 'installer',
   target_hours: {
-    1: 8.5,
-    2: 8.5,
-    3: 8.5,
-    4: 8.5,
-    5: 4.5,
+    1: 7.7,
+    2: 7.7,
+    3: 7.7,
+    4: 7.7,
+    5: 7.7,
     6: 0,
     0: 0
   },
@@ -248,3 +263,20 @@ export const DEFAULT_SETTINGS: UserSettings = {
   require_confirmation: true,
   is_visible_to_others: true
 };
+
+// --- RPC Response Types ---
+export interface LifetimeStats {
+  target: number;
+  actual: number;
+  diff: number;
+  start_date: string;
+  cutoff_date: string;
+}
+
+export interface MonthlyStats {
+  target: number;
+  actual: number;
+  project_hours: number;
+  credits: number;
+  diff: number;
+}

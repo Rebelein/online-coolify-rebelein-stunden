@@ -375,10 +375,19 @@ const OfficeUserListPage: React.FC = () => {
         const monthStartStr = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1).toISOString().split('T')[0];
         const monthEndStr = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).toISOString().split('T')[0];
 
+        const todayStr = getLocalISOString();
+
         const userAbsences = monthlyAbsences.filter(a => a.user_id === user.user_id);
         for (const abs of userAbsences) {
+            // Ignore absences completely in the future
+            if (abs.start_date > todayStr) continue;
+
             if (abs.end_date >= monthStartStr && abs.start_date <= monthEndStr) {
-                const effectiveEnd = abs.end_date > monthEndStr ? monthEndStr : abs.end_date;
+                let effectiveEnd = abs.end_date > monthEndStr ? monthEndStr : abs.end_date;
+
+                // Cap at today (don't show future cutoff based on absence)
+                if (effectiveEnd > todayStr) effectiveEnd = todayStr;
+
                 if (!maxDateStr || effectiveEnd > maxDateStr) {
                     maxDateStr = effectiveEnd;
                 }
