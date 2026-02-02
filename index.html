@@ -19,6 +19,42 @@
 
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Zeiterfassung">
+  
+  <script>
+    // Migration: Force clear old caches if not done yet
+    (function() {
+      try {
+        const RESET_KEY = 'pwa_reset_v1_1_20'; // Increment this to force reset for users
+        if (!localStorage.getItem(RESET_KEY)) {
+          console.log('Performing PWA migration cleanup...');
+          
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(registrations) {
+              for(let registration of registrations) {
+                console.log('Unregistering SW:', registration);
+                registration.unregister();
+              }
+            });
+          }
+          
+          if ('caches' in window) {
+            caches.keys().then(function(names) {
+              for (let name of names) {
+                console.log('Deleting cache:', name);
+                caches.delete(name);
+              }
+            });
+          }
+          
+          localStorage.setItem(RESET_KEY, 'true');
+          // Optional: Force reload if we suspect we are dirty, but let's try just cleaning first.
+          // window.location.reload(); 
+        }
+      } catch(e) {
+        console.error("Migration error:", e);
+      }
+    })();
+  </script>
 
   <script>
     window.deferredInstallPrompt = null;
