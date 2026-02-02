@@ -155,6 +155,7 @@ const AnalysisPage: React.FC = () => {
         }
 
         entries.forEach(e => {
+            if (e.is_deleted) return;
             // INCLUDE 'special_holiday' for our virtual entries
             if (!['vacation', 'sick', 'holiday', 'special_holiday'].includes(e.type || '')) return;
 
@@ -369,7 +370,7 @@ const AnalysisPage: React.FC = () => {
         const projectHours = entries
             .filter(e => {
                 const absenceTypes = ['vacation', 'sick', 'holiday', 'special_holiday', 'sick_child', 'sick_pay', 'unpaid'];
-                return e.date >= startStr && e.date <= limitDateStr && e.type !== 'break' && e.type !== 'overtime_reduction' && !absenceTypes.includes(e.type || '') && e.date >= effectiveStartDate;
+                return !e.is_deleted && e.date >= startStr && e.date <= limitDateStr && e.type !== 'break' && e.type !== 'overtime_reduction' && !absenceTypes.includes(e.type || '') && e.date >= effectiveStartDate;
             })
             .reduce((sum, e) => {
                 let h = 0;
@@ -457,7 +458,7 @@ const AnalysisPage: React.FC = () => {
                 continue;
             }
 
-            const entryAbsence = entries.find(e => e.date === dateStr && ['vacation', 'sick', 'holiday', 'unpaid', 'special_holiday'].includes(e.type || ''));
+            const entryAbsence = entries.find(e => !e.is_deleted && e.date === dateStr && ['vacation', 'sick', 'holiday', 'unpaid', 'special_holiday'].includes(e.type || ''));
             if (entryAbsence) {
                 const target = getDailyTargetForDate(dateStr, settings.target_hours);
                 // Only credit hours for paid absences
@@ -467,7 +468,7 @@ const AnalysisPage: React.FC = () => {
                 continue;
             }
 
-            const dayEntries = entries.filter(e => e.date === dateStr && e.type !== 'break' && e.type !== 'special_holiday');
+            const dayEntries = entries.filter(e => !e.is_deleted && e.date === dateStr && e.type !== 'break' && e.type !== 'special_holiday');
 
             // Calculate stats
             const totalHours = dayEntries.reduce((sum, e) => {

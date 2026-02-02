@@ -5,6 +5,7 @@ import { supabase } from './services/supabaseClient';
 import GlassLayout from './components/GlassLayout';
 import BottomNav from './components/BottomNav';
 import AuthPage from './pages/AuthPage';
+import { ReloadPrompt } from './components/ReloadPrompt';
 
 // Lazy Loading: Seiten werden erst geladen, wenn sie wirklich gebraucht werden.
 // Das reduziert die initiale Bundle-Größe und verbessert die Startzeit auf iOS.
@@ -31,15 +32,7 @@ const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Service Worker State
-  // Einfache Service Worker Registrierung ohne Auto-Update-Zwang
-  useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').then(() => {
-        console.log('Service Worker registered');
-      });
-    }
-  }, []);
+
 
   useEffect(() => {
     const initSession = async () => {
@@ -88,6 +81,7 @@ const App: React.FC = () => {
           <div className="w-8 h-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
           <span className="text-sm">Lade App...</span>
         </div>
+        <ReloadPrompt />
       </GlassLayout>
     );
   }
@@ -96,6 +90,7 @@ const App: React.FC = () => {
     return (
       <GlassLayout>
         <AuthPage />
+        <ReloadPrompt />
       </GlassLayout>
     );
   }
@@ -122,9 +117,11 @@ const App: React.FC = () => {
             </Routes>
           </Suspense>
         </div>
+
         <BottomNav />
+        <ReloadPrompt />
       </GlassLayout>
-    </Router>
+    </Router >
   );
 };
 

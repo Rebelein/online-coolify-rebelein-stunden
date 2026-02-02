@@ -6,8 +6,9 @@ import { useNavigate } from 'react-router-dom';
 import {
     Activity, ArrowRight, CheckCircle, Clock, FileText,
     LayoutDashboard, UserCheck, Shield, ChevronRight, AlertTriangle,
-    Palmtree, Briefcase, Truck, Home, Calculator, X, MessageCircle, Hash, ChevronDown
+    Palmtree, Briefcase, Truck, Home, Calculator, X, MessageCircle, Hash, ChevronDown, Search, Download
 } from 'lucide-react';
+import { generateSearchReport } from '../services/pdfExportService';
 import { TimeEntry, UserSettings, UserAbsence, VacationRequest } from '../types';
 
 const OfficeDashboard: React.FC = () => {
@@ -44,6 +45,49 @@ const OfficeDashboard: React.FC = () => {
             return next;
         });
     };
+
+    // SEARCH STATE
+    const [searchModalOpen, setSearchModalOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<TimeEntry[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+
+    const handleSearch = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        if (!searchQuery.trim()) return;
+
+        setIsSearching(true);
+        try {
+            const terms = searchQuery.trim().split(/\s+/);
+            // Construct OR filter: for each term, check client_name OR order_number
+            const conditions = terms.map(term => `client_name.ilike.%${term}%,order_number.ilike.%${term}%`).join(',');
+
+            const { data, error } = await supabase
+                .from('time_entries')
+                .select('*')
+                .or(conditions)
+                .is('deleted_at', null)
+                .order('date', { ascending: false })
+                .limit(1000);
+
+            if (error) throw error;
+            setSearchResults(data as TimeEntry[]);
+        } catch (err) {
+            console.error("Search error:", err);
+            alert("Fehler bei der Suche");
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
+    const groupedSearchResults = useMemo(() => {
+        const groups: Record<string, TimeEntry[]> = {};
+        searchResults.forEach(e => {
+            if (!groups[e.user_id]) groups[e.user_id] = [];
+            groups[e.user_id].push(e);
+        });
+        return groups;
+    }, [searchResults]);
 
     const [expandedVacationUsers, setExpandedVacationUsers] = useState<string[]>([]);
     const toggleVacationUser = (userId: string) => {
@@ -267,13 +311,23 @@ const OfficeDashboard: React.FC = () => {
         <div className="p-6 h-full overflow-y-auto md:max-w-7xl md:mx-auto w-full pb-24 space-y-8">
 
             {/* Header */}
-            <div>
-                <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-teal-200 to-emerald-400">
-                    Dashboard
-                </h1>
-                <p className="text-white/50 text-sm mt-1">
-                    {isOfficeOrAdmin ? 'Kommandozentrale & Übersicht' : 'Meine Aufgaben'}
-                </p>
+            <div className="flex justify-between items-end">
+                <div>
+                    <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-teal-200 to-emerald-400">
+                        Dashboard
+                    </h1>
+                    <p className="text-white/50 text-sm mt-1">
+                        {isOfficeOrAdmin ? 'Kommandozentrale & Übersicht' : 'Meine Aufgaben'}
+                    </p>
+                </div>
+                {/* Search Button */}
+                <button
+                    onClick={() => setSearchModalOpen(true)}
+                    className="p-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-white/70 hover:text-white transition-all group"
+                    title="Suche öffnen"
+                >
+                    <Search size={22} className="group-hover:scale-110 transition-transform" />
+                </button>
             </div>
 
             {/* SECTION 1: MY PENDING CONFIRMATIONS (Everyone) */}
@@ -723,6 +777,97 @@ const OfficeDashboard: React.FC = () => {
                         </div>
                     </GlassCard>
                 </div >
+            )}
+
+            {/* SEARCH MODAL */}
+            {searchModalOpen && (
+                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-200">
+                    <GlassCard className="w-full max-w-4xl max-h-[90vh] flex flex-col !p-0 overflow-hidden shadow-2xl border-white/20">
+                        <div className="p-4 bg-gray-900 border-b border-white/10 flex gap-4 items-center">
+                            <Search size={24} className="text-teal-400 shrink-0" />
+                            <form onSubmit={handleSearch} className="flex-1 relative">
+                                <input
+                                    autoFocus
+                                    type="text"
+                                    className="w-full bg-transparent border-none outline-none text-xl text-white placeholder-white/30"
+                                    placeholder="Suche nach Kunde, Auftrag..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                />
+                            </form>
+                            <button
+                                onClick={handleSearch}
+                                className="bg-teal-600 hover:bg-teal-500 text-white px-4 py-2 rounded-lg font-bold text-sm disabled:opacity-50"
+                                disabled={isSearching}
+                            >
+                                {isSearching ? '...' : 'Suchen'}
+                            </button>
+                            <div className="w-px h-8 bg-white/10 mx-2"></div>
+                            <button onClick={() => setSearchModalOpen(false)} className="text-white/50 hover:text-white"><X size={24} /></button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-4 bg-gray-900/50">
+                            {/* Results Header / Actions */}
+                            {searchResults.length > 0 && (
+                                <div className="flex justify-between items-center mb-6">
+                                    <div className="text-white/60 text-sm">
+                                        <span className="text-white font-bold">{searchResults.length}</span> Treffer gefunden
+                                    </div>
+                                    <button
+                                        onClick={() => generateSearchReport(searchResults, users, searchQuery)}
+                                        className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-teal-300 px-3 py-2 rounded-lg text-sm font-bold transition-colors"
+                                    >
+                                        <Download size={16} /> Suchbericht (PDF)
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Results List Grouped */}
+                            <div className="space-y-8">
+                                {Object.keys(groupedSearchResults).length === 0 && !isSearching && searchQuery && (
+                                    <div className="text-center text-white/30 py-10">Keine Ergebnisse gefunden</div>
+                                )}
+
+                                {Object.keys(groupedSearchResults).map(userId => {
+                                    const user = users.find(u => u.user_id === userId);
+                                    const entries = groupedSearchResults[userId];
+
+                                    return (
+                                        <div key={userId} className="animate-in slide-in-from-bottom-2">
+                                            <div className="flex items-center gap-3 mb-3 border-b border-white/5 pb-2">
+                                                <div className="w-8 h-8 rounded-full bg-teal-500/20 flex items-center justify-center font-bold text-teal-300 text-sm border border-teal-500/30">
+                                                    {user?.display_name.charAt(0) || '?'}
+                                                </div>
+                                                <h3 className="font-bold text-white text-lg">{user?.display_name || 'Unbekannt'}</h3>
+                                                <span className="text-xs text-white/40 ml-auto">{entries.length} Einträge</span>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                                {entries.map(entry => (
+                                                    <div key={entry.id} className="bg-white/5 hover:bg-white/10 border border-white/5 p-3 rounded-xl transition-colors">
+                                                        <div className="flex justify-between items-start mb-2">
+                                                            <span className="text-xs font-mono text-teal-200/70">{new Date(entry.date).toLocaleDateString()}</span>
+                                                            <span className="text-sm font-bold text-white font-mono">{entry.hours.toLocaleString('de-DE')}h</span>
+                                                        </div>
+                                                        <div className="font-bold text-white text-sm mb-1 truncate">{entry.client_name}</div>
+                                                        {entry.order_number && (
+                                                            <div className="inline-block bg-white/5 px-1.5 py-0.5 rounded text-[10px] text-white/50 font-mono mb-2">
+                                                                #{entry.order_number}
+                                                            </div>
+                                                        )}
+                                                        {entry.note && (
+                                                            <div className="text-xs text-white/50 italic line-clamp-2">"{entry.note}"</div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </GlassCard>
+                </div>
             )}
         </div >
     );
